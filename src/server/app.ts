@@ -5,9 +5,12 @@ import { ZodError } from 'zod';
 import { CreateRoomRequestSchema, JoinRoomRequestSchema, ReconnectRoomRequestSchema } from '../shared/contracts.js';
 import { GameError, toErrorPayload } from '../shared/errors.js';
 import { RoomStore } from './room-store.js';
+import { AuthStore } from './auth-store.js';
+import { createAuthRouter } from './auth-routes.js';
 
 export interface AppOptions {
   roomStore?: RoomStore;
+  authStore?: AuthStore;
   publicOrigin?: string;
   staticDir?: string;
 }
@@ -15,6 +18,7 @@ export interface AppOptions {
 export function createApp(options: AppOptions = {}): express.Express {
   const app = express();
   const roomStore = options.roomStore ?? new RoomStore();
+  const authStore = options.authStore ?? new AuthStore();
   app.locals.roomStore = roomStore;
 
   app.disable('x-powered-by');
@@ -24,6 +28,9 @@ export function createApp(options: AppOptions = {}): express.Express {
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
   });
+
+  // Auth routes
+  app.use('/api', createAuthRouter(authStore));
 
   app.post('/api/rooms', (req, res, next) => {
     try {
@@ -86,7 +93,7 @@ function originGuard(publicOrigin?: string) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     if (req.method === 'OPTIONS') {
       res.sendStatus(204);

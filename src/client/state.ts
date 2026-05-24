@@ -38,6 +38,9 @@ export interface ClientStateSnapshot {
   serverClockOffsetMs: number;
   animatedCardKeys: Set<string>;
   selectionState: SelectionState;
+  authUser: { username: string } | null;
+  authToken: string | null;
+  showAuthPage: boolean;
 }
 
 export class ClientState {
@@ -54,7 +57,10 @@ export class ClientState {
     connected: false,
     serverClockOffsetMs: 0,
     animatedCardKeys: new Set(),
-    selectionState: createInitialSelectionState()
+    selectionState: createInitialSelectionState(),
+    authUser: null,
+    authToken: null,
+    showAuthPage: true
   };
 
   subscribe(listener: () => void): () => void {
@@ -115,6 +121,7 @@ export class ClientState {
     if (this.snapshot.currentRoomCode) {
       this.cleanupToken(this.snapshot.currentRoomCode);
     }
+    const { authUser, authToken, showAuthPage } = this.snapshot;
     this.snapshot = {
       publicView: null,
       privateView: null,
@@ -126,9 +133,104 @@ export class ClientState {
       connected: false,
       serverClockOffsetMs: 0,
       animatedCardKeys: new Set(),
-      selectionState: createInitialSelectionState()
+      selectionState: createInitialSelectionState(),
+      authUser,
+      authToken,
+      showAuthPage
     };
     this.emitChange();
+  }
+
+  /* ── Auth ── */
+
+  async authRegister(username: string, password: string, inviteCode: string): Promise<void> {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, inviteCode })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error?.message ?? '注册失败。');
+    this.snapshot.authToken = data.token;
+    this.snapshot.authUser = data.user;
+    this.snapshot.showAuthPage = false;
+    localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+    this.emitChange();
+  }
+
+  async authLogin(username: string, password: string): Promise<void> {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error?.message ?? '登陆失败。');
+    this.snapshot.authToken = data.token;
+    this.snapshot.authUser = data.user;
+    this.snapshot.showAuthPage = false;
+    localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+    this.emitChange();
+  }
+
+  async authLogout(): Promise<void> {
+    const token = this.snapshot.authToken;
+    if (token) {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+      }).catch(() => {});
+    }
+    this.snapshot.authToken = null;
+    this.snapshot.authUser = null;
+    this.snapshot.showAuthPage = true;
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    this.emitChange();
+  }
+
+  async authRestoreSession(): Promise<void> {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!token) {
+      this.snapshot.showAuthPage = true;
+      this.emitChange();
+      return;
+    }
+    // 添加 token 到 snapshot 以便后续 fetch 携带
+    this.snapshot.authToken = token;
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        this.snapshot.authToken = null;
+        this.snapshot.showAuthPage = true;
+        this.emitChange();
+        return;
+      }
+      const data = await res.json();
+      this.snapshot.authUser = data.user;
+      this.snapshot.showAuthPage = false;
+      this.emitChange();
+    } catch {
+      // 网络错误，静默处理（保留 token 稍后重试）
+      this.snapshot.showAuthPage = false; // 不阻塞游戏
+      this.emitChange();
+    }
+  }
+
+  authShowPage(): void {
+    this.snapshot.showAuthPage = true;
+    this.emitChange();
+  }
+
+  authHidePage(): void {
+    this.snapshot.showAuthPage = false;
+    this.emitChange();
+  }
+
+  authGetToken(): string | null {
+    return this.snapshot.authToken;
   }
 
   clearError(): void {
@@ -299,3 +401,5 @@ function parseSocketError(raw: string): string {
     return raw;
   }
 }
+
+const AUTH_TOKEN_KEY = 'online-room-game:authToken';

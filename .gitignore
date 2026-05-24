@@ -13,3 +13,5 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+data/
+!data/.gitkeep

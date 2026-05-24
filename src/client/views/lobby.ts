@@ -15,6 +15,7 @@ export function renderLobby(snapshot: ClientStateSnapshot): string {
   const canStart = canStartGame(snapshot.publicView?.status, isOwner, players);
 
   const inRoom = Boolean(snapshot.publicView);
+  const loggedInUsername = snapshot.authUser?.username ?? '';
   return `
     <section class="panel lobby-panel" aria-labelledby="lobby-title">
       <h1 id="lobby-title">🃏 在线房间游戏</h1>
@@ -24,13 +25,13 @@ export function renderLobby(snapshot: ClientStateSnapshot): string {
       <div class="forms">
         <form id="create-form" class="card-form">
           <h2>创建房间</h2>
-          <label>昵称 <input name="nickname" required maxlength="20" autocomplete="nickname" /></label>
+          <label>昵称 <input name="nickname" required maxlength="20" autocomplete="nickname" value="${escapeHtml(loggedInUsername)}" /></label>
           <button type="submit">创建房间</button>
         </form>
         <form id="join-form" class="card-form">
           <h2>加入房间</h2>
           <label>房间码 <input name="roomCode" required maxlength="12" autocapitalize="characters" /></label>
-          <label>昵称 <input name="nickname" required maxlength="20" autocomplete="nickname" /></label>
+          <label>昵称 <input name="nickname" required maxlength="20" autocomplete="nickname" value="${escapeHtml(loggedInUsername)}" /></label>
           <button type="submit">加入房间</button>
         </form>
         <form id="reconnect-form" class="card-form">

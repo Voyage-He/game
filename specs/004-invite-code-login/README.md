@@ -1,11 +1,13 @@
 ---
-status: planned
+status: in-progress
 created: 2026-05-24
 priority: medium
 created_at: 2026-05-24T14:58:39.677382Z
-updated_at: 2026-05-24T14:58:39.677382Z
+updated_at: 2026-05-24T15:14:31.559145Z
+transitions:
+- status: in-progress
+  at: 2026-05-24T15:14:31.559145Z
 ---
-
 # 邀请码注册 + 用户名密码登陆
 
 > **Status**: planned · **Priority**: medium · **Created**: 2026-05-24
