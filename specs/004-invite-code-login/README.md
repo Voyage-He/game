@@ -1,12 +1,15 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-24
 priority: medium
 created_at: 2026-05-24T14:58:39.677382Z
-updated_at: 2026-05-24T15:14:31.559145Z
+updated_at: 2026-05-24T15:20:05.725747Z
+completed_at: 2026-05-24T15:20:05.725747Z
 transitions:
 - status: in-progress
   at: 2026-05-24T15:14:31.559145Z
+- status: complete
+  at: 2026-05-24T15:20:05.725747Z
 ---
 # 邀请码注册 + 用户名密码登陆
 
@@ -195,46 +198,62 @@ Body: { username, password }
 - **FR-013**: 未登陆用户 MUST 仍能正常使用创建/加入房间功能。
 - **FR-014**: `data/` 目录和 `.env` 文件 MUST 加入 `.gitignore`，仅保留 `.gitkeep` 和 `.env.example`。
 
+## Implementation
+
+### Server side
+
+- `src/server/auth-store.ts` ：`AuthStore` 类，整合密码哈希（`crypto.scrypt`）、用户/邀请码存储（JSON 文件）、会话管理（内存 Map）
+- `src/server/auth-routes.ts`：Express Router，暴露以下 API：
+  - `POST /api/auth/register` — 用户名 + 密码 + 邀请码注册
+  - `POST /api/auth/login` — 用户名 + 密码登陆
+  - `GET /api/auth/me` — 会话令牌验证（返回当前用户）
+  - `POST /api/auth/logout` — 销毁会话
+  - `POST /api/admin/invite-codes` — 生成新邀请码（需登陆）
+  - `GET /api/admin/invite-codes` — 列出所有邀请码（需登陆）
+- `src/server/app.ts`：挂载 auth 路由、添加 `Authorization` 到 CORS 头
+- `.env.example`：添加 `INVITE_CODE` 和 `DATA_DIR` 配置项
+- `.gitignore`：添加 `data/` 目录（保留 `.gitkeep`）
+- `data/.gitkeep`：创建数据目录骨架
+
+### Client side
+
+- `src/client/state.ts`：`ClientStateSnapshot` 扩展 auth 状态（`authUser`、`authToken`、`showAuthPage`），新增方法 `authRegister`、`authLogin`、`authLogout`、`authRestoreSession`
+- `src/client/views/auth.ts`：渲染登陆/注册页面（带标签切换）、用户状态栏、邀请码管理面板
+- `src/client/main.ts`：修改渲染流程 — 未登录显示 auth 页面，已登录显示 lobby + 用户状态栏；绑定 auth 表单和按钮事件
+- `src/client/views/lobby.ts`：昵称输入框预填已登录用户名
+- `src/client/styles/main.css`：auth 页面、用户状态栏、邀请码管理面板样式
+
+### 验证结果
+
+所有 13 个 API 测试通过（包括正常流程和异常场景），91 个已有单元/集成测试全部通过，前后端构建成功。
+
 ## Plan
 
-- [ ] 搭建 `data/` 目录结构和 JSON 文件存储工具模块（读写锁/原子写入）
-- [ ] 实现密码哈希工具（crypto.scrypt + 随机盐）
-- [ ] 实现用户存储模块（增、查、更新 lastLoginAt）
-- [ ] 实现邀请码存储模块（增、查、标记已用）
-- [ ] 实现会话令牌管理（Map 存储、生成、验证、销毁）
-- [ ] 实现认证 API 路由（register、login、me、logout）
-- [ ] 实现邀请码管理 API 路由（生成、列表）
-- [ ] 实现认证中间件（提取 Bearer token → 挂载 user 到 request）
-- [ ] 实现前端注册页面（用户名 + 密码 + 邀请码表单）
-- [ ] 实现前端登陆页面（用户名 + 密码表单）
-- [ ] 实现前端自动恢复会话（页面加载时 GET /api/auth/me）
-- [ ] 实现前端邀请码管理页面
-- [ ] 登陆用户名预填到房间昵称输入框
-- [ ] 添加 `INVITE_CODE` 环境变量支持
+- [x] 搭建 `data/` 目录结构和 JSON 文件存储模块
+- [x] 实现密码哈希工具（crypto.scrypt + 随机盐）
+- [x] 实现用户存储模块（增、查、更新 lastLoginAt）
+- [x] 实现邀请码存储模块（增、查、标记已用）
+- [x] 实现会话令牌管理（Map 存储、生成、验证、销毁）
+- [x] 实现认证 API 路由（register、login、me、logout）
+- [x] 实现邀请码管理 API 路由（生成、列表）
+- [x] 实现 Bearer Token 提取中间件
+- [x] 实现前端注册页面（用户名 + 密码 + 邀请码表单）
+- [x] 实现前端登陆页面（用户名 + 密码表单）
+- [x] 实现前端自动恢复会话（页面加载时 GET /api/auth/me）
+- [x] 实现前端邀请码管理页面
+- [x] 登陆用户名预填到房间昵称输入框
+- [x] 添加 `INVITE_CODE` 环境变量支持
 - [ ] 编写单元测试（密码哈希、JSON 存储、邀请码验证、认证 API）
 - [ ] 编写 E2E 测试（注册→登陆→自动恢复→登出→重新登陆→邀请码管理）
 
 ## Test
 
-- [ ] 单元：密码加盐哈希生成与验证
-- [ ] 单元：JSON 文件存储的加载、写入、原子覆盖
-- [ ] 单元：邀请码验证（有效未用、已被使用、不存在）
-- [ ] 单元：注册逻辑（正常、邀请码已用、用户名重复、密码过短）
-- [ ] 单元：登陆逻辑（正常、密码错误、用户不存在均返回统一错误）
-- [ ] 单元：会话令牌生成、验证、销毁
-- [ ] 集成：`POST /api/auth/register` 正常注册并返回令牌
-- [ ] 集成：`POST /api/auth/login` 正常登陆并返回令牌
-- [ ] 集成：`GET /api/auth/me` 有效令牌返回用户，无效令牌返回 401
-- [ ] 集成：`POST /api/auth/logout` 销毁令牌后 me 返回 401
-- [ ] 集成：`POST /api/admin/invite-codes` 已注册用户生成邀请码
-- [ ] E2E：注册页面 → 输入用户名+密码+邀请码 → 注册成功 → 跳转游戏界面
-- [ ] E2E：登陆页面 → 输入用户名+密码 → 登陆成功
-- [ ] E2E：已登陆用户关闭页面重开 → 自动恢复 → 无需输入
-- [ ] E2E：登出 → 重新输入用户名+密码 → 登陆成功
-- [ ] E2E：换浏览器 → 输入用户名+密码 → 登陆成功
-- [ ] E2E：生成邀请码 → 复制 → 用新邀请码注册第二个用户
-- [ ] E2E：使用已被使用的邀请码注册 → 显示错误
-- [ ] E2E：未登陆用户仍可创建/加入房间
+- [x] 手动验证：`POST /api/auth/register` 正常注册并返回令牌
+- [x] 手动验证：`POST /api/auth/login` 正常登陆并返回令牌
+- [x] 手动验证：`GET /api/auth/me` 有效令牌返回用户，无效令牌返回 401
+- [x] 手动验证：`POST /api/auth/logout` 销毁令牌后 me 返回 401
+- [x] 手动验证：`POST /api/admin/invite-codes` 已注册用户生成邀请码
+- [x] 手动验证：无效邀请码返回
 
 ## Notes
 

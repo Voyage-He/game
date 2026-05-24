@@ -547,6 +547,10 @@ input:focus-visible {
   margin-bottom: 1rem;
 }
 
+.auth-form[hidden] {
+  display: none;
+}
+
 .auth-form label {
   font-weight: 600;
   color: #172033;
