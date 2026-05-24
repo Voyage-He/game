@@ -34,15 +34,19 @@ Build a self-hosted, invite-only browser game for exactly three players using th
 
 ### Initial Gate
 
-The current constitution file (`.specify/memory/constitution.md`) still contains placeholder principles and does not define enforceable project-specific gates. No active constitutional violations are detectable for this plan.
+- **服务端权威与规则一致性**: PASS — the plan assigns dealing, role actions, swaps, timers, voting, settlement, and cleanup to the Node.js server and shared contracts.
+- **临时数据与隐私最小化**: PASS — storage is explicitly in-memory and limited to active room/game data, reconnect-token hashes, nicknames, connection state, and transient chat delivery.
+- **测试先行与契约可验证**: PASS — Vitest unit/integration, Socket.IO/HTTP contract coverage, and Playwright three-browser flow tests are required before implementation tasks.
+- **简洁自托管架构**: PASS — one TypeScript web app with Express, Socket.IO, Vite, Zod, and no persistent database or public-platform features.
+- **清晰中文体验与实时可用性**: PASS — player-facing flows use Chinese copy and SC-002 sets the 95% within 2 seconds visible-update target.
 
-**Initial Gate Result**: PASS — no concrete gates to enforce. Caveat: if the constitution is later ratified with concrete technology, testing, security, or workflow rules, this plan must be rechecked against those rules.
+**Initial Gate Result**: PASS — no constitution violations or complexity exceptions required.
 
 ### Post-Design Gate
 
-Phase 0 and Phase 1 artifacts use a simple single-service web application, in-memory temporary storage, and testable contracts aligned with the feature privacy and temporary-room requirements. No complexity exceptions are introduced.
+Phase 0 and Phase 1 artifacts keep the single-service architecture, in-memory temporary storage, privacy-preserving visibility projections, Chinese user-facing errors, and HTTP/Socket.IO contracts. The design includes tests for rule correctness, hidden-information boundaries, reconnect, invalid operations, and end-to-end three-player play.
 
-**Post-Design Gate Result**: PASS — no active constitutional gates violated.
+**Post-Design Gate Result**: PASS — design remains aligned with all five ratified constitution principles.
 
 ## Project Structure
 

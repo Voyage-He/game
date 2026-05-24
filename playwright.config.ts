@@ -5,7 +5,7 @@ process.env.no_proxy = process.env.NO_PROXY;
 
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 30000,
+  timeout: 60000,
   expect: { timeout: 5000 },
   fullyParallel: false,
   use: {
@@ -13,7 +13,7 @@ export default defineConfig({
     trace: 'on-first-retry'
   },
   webServer: {
-    command: 'npm run build && PORT=3000 PHASE_TIME_SCALE=0.05 npm start',
+    command: 'npm run build && PORT=3000 PHASE_TIME_SCALE=0.5 VOTING_TIMEOUT_MS=8000 npm start',
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120000

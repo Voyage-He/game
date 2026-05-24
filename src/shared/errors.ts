@@ -27,7 +27,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_PHASE: '当前阶段不能执行该操作。',
   INELIGIBLE_PLAYER: '当前玩家不能执行该身份操作。',
   INVALID_TARGET: '目标无效，请重新选择。',
-  ACTION_WINDOW_CLOSED: '该行动阶段已经结束。',
+  ACTION_WINDOW_CLOSED: '该行动阶段已经结束或你已完成本阶段行动。',
   VOTE_ALREADY_SUBMITTED: '你已经提交过投票。',
   VALIDATION_ERROR: '提交内容格式不正确。'
 };

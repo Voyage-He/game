@@ -35,13 +35,16 @@ export function projectPublicRoomView(room: Room): PublicRoomView {
     roomCode: room.roomCode,
     status: room.status,
     version: room.version,
-    players
+    players,
+    serverNow: new Date().toISOString()
   };
 
   if (phase) {
     view.phase = phase;
     view.phaseStartedAt = room.phaseStartedAt;
-    view.phaseEndsAt = room.phaseEndsAt;
+    if (phase !== 'free_speech' && phase !== 'settlement' && room.phaseEndsAt) {
+      view.phaseEndsAt = room.phaseEndsAt;
+    }
     view.phaseCompletion = { currentRoleCompleted: isCurrentRoleCompleted(room, phase) };
   }
 
@@ -112,6 +115,7 @@ function buildRevealedCards(room: Room, seatId: string): Array<{ location: strin
 
   for (const action of room.actions) {
     if (action.actingSeatId !== seatId) continue;
+    if (action.phase !== room.phase) continue;
     for (const cardId of action.revealedCardIds) {
       const card = getCardById(room, cardId);
       const target = action.selectedTargets.find((candidate) => {

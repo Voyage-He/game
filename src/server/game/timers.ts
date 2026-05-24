@@ -12,8 +12,14 @@ export interface RoomTimerOptions extends RoomTimerCallbacks {
   votingTimeoutMs?: number;
 }
 
+interface ActiveTimerRecord {
+  expectedPhase: Phase;
+  expectedPhaseEndsAt: string;
+  timeoutHandle: NodeJS.Timeout;
+}
+
 export class RoomTimerService {
-  private readonly timers = new Map<string, NodeJS.Timeout>();
+  private readonly timers = new Map<string, ActiveTimerRecord>();
   private readonly phaseTimeScale: number;
   private readonly votingTimeoutMs: number;
   private readonly callbacks: RoomTimerCallbacks;
@@ -65,16 +71,18 @@ export class RoomTimerService {
 
   schedule(room: Room): void {
     this.clear(room.roomCode);
-    if (!room.phaseEndsAt || room.phase === 'free_speech' || room.phase === 'settlement') return;
-    const delay = Math.max(0, new Date(room.phaseEndsAt).getTime() - Date.now());
-    const timeout = setTimeout(() => this.onPhaseTimeout(room.roomCode), delay);
-    if (typeof timeout.unref === 'function') timeout.unref();
-    this.timers.set(room.roomCode, timeout);
+    if (!room.phase || !room.phaseEndsAt || room.phase === 'free_speech' || room.phase === 'settlement') return;
+    const expectedPhase = room.phase;
+    const expectedPhaseEndsAt = room.phaseEndsAt;
+    const delay = Math.max(0, new Date(expectedPhaseEndsAt).getTime() - Date.now());
+    const timeoutHandle = setTimeout(() => this.onPhaseTimeout(room.roomCode, expectedPhase, expectedPhaseEndsAt), delay);
+    if (typeof timeoutHandle.unref === 'function') timeoutHandle.unref();
+    this.timers.set(room.roomCode, { expectedPhase, expectedPhaseEndsAt, timeoutHandle });
   }
 
   clear(roomCode: string): void {
     const existing = this.timers.get(roomCode);
-    if (existing) clearTimeout(existing);
+    if (existing) clearTimeout(existing.timeoutHandle);
     this.timers.delete(roomCode);
   }
 
@@ -82,9 +90,21 @@ export class RoomTimerService {
     for (const roomCode of this.timers.keys()) this.clear(roomCode);
   }
 
-  private onPhaseTimeout(roomCode: string): void {
+  private onPhaseTimeout(roomCode: string, expectedPhase?: Phase, expectedPhaseEndsAt?: string): void {
+    const active = this.timers.get(roomCode);
+    if (active && active.expectedPhase === expectedPhase && active.expectedPhaseEndsAt === expectedPhaseEndsAt) {
+      clearTimeout(active.timeoutHandle);
+      this.timers.delete(roomCode);
+    }
+
     const room = this.store.getRoom(roomCode);
-    if (!room) return;
+    if (!room || room.phase === 'free_speech' || room.phase === 'settlement') return;
+
+    const phaseToMatch = expectedPhase ?? room.phase;
+    const deadlineToMatch = expectedPhaseEndsAt ?? room.phaseEndsAt;
+    if (!phaseToMatch || !deadlineToMatch) return;
+    if (room.phase !== phaseToMatch || room.phaseEndsAt !== deadlineToMatch) return;
+
     const next = advanceTimedPhase(room, this.engineOptions());
     this.store.replaceRoom(next);
     this.callbacks.onRoomUpdated?.(next);

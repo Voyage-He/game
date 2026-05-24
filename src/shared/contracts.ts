@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ERROR_CODES } from './errors.js';
-import { PHASES } from './types.js';
+import { CAMPS, PHASES, ROLES, ROLE_PHASES, ROOM_STATUSES } from './types.js';
 
 const nicknameRegex = /^[^<>\\{}]{1,20}$/u;
 
@@ -84,10 +84,59 @@ export const ErrorResponseSchema = z.object({
   })
 });
 
+export const IsoTimestampSchema = z.string().datetime();
+export const PhaseSchema = z.enum(PHASES);
+export const RoleSchema = z.enum(ROLES);
+export const RolePhaseSchema = z.enum(ROLE_PHASES);
+export const RoomStatusSchema = z.enum(ROOM_STATUSES);
+
+export const PlayerPublicViewSchema = z.object({
+  seatIndex: SeatIndexSchema,
+  nickname: z.string().min(1),
+  isOwner: z.boolean(),
+  connectionStatus: z.enum(['connected', 'disconnected'])
+});
+
+export const PublicRoomViewSchema = z.object({
+  roomCode: RoomCodeSchema,
+  status: RoomStatusSchema,
+  version: z.number().int().nonnegative(),
+  players: z.array(PlayerPublicViewSchema),
+  serverNow: IsoTimestampSchema,
+  phase: PhaseSchema.optional(),
+  phaseStartedAt: IsoTimestampSchema.optional(),
+  phaseEndsAt: IsoTimestampSchema.optional(),
+  phaseCompletion: z.object({ currentRoleCompleted: z.boolean() }).optional(),
+  voteCompletion: z.object({ submittedCount: z.number().int().nonnegative(), requiredCount: z.number().int().nonnegative() }).optional()
+});
+
+export const PrivateRoomViewSchema = z.object({
+  seatIndex: SeatIndexSchema,
+  initialRole: RoleSchema.nullable(),
+  currentEligibleAction: z
+    .object({
+      phase: RolePhaseSchema,
+      options: z.array(z.string().min(1))
+    })
+    .nullable(),
+  revealedCards: z.array(z.object({ location: z.string().min(1), role: RoleSchema })),
+  submittedVote: z.object({ targetSeatIndex: SeatIndexSchema, isAutomatic: z.boolean() }).nullable()
+});
+
+export const SettlementViewSchema = z.object({
+  voteTotals: z.array(z.object({ seatIndex: SeatIndexSchema, votes: z.number().int().nonnegative() })),
+  eliminatedSeatIndex: SeatIndexSchema.nullable(),
+  winningCamp: z.enum(CAMPS),
+  finalPlayerCards: z.array(z.object({ seatIndex: SeatIndexSchema, nickname: z.string().min(1), role: RoleSchema })),
+  finalUnderwaterCards: z.array(z.object({ index: UnderwaterIndexSchema, role: RoleSchema })),
+  automaticActions: z.array(z.object({ phase: RolePhaseSchema, seatIndex: SeatIndexSchema.nullable() })),
+  automaticVotes: z.array(z.object({ voterSeatIndex: SeatIndexSchema, targetSeatIndex: SeatIndexSchema }))
+});
+
 export const PhaseChangedSchema = z.object({
-  phase: z.enum(PHASES),
-  phaseStartedAt: z.string(),
-  phaseEndsAt: z.string().optional()
+  phase: PhaseSchema,
+  phaseStartedAt: IsoTimestampSchema,
+  phaseEndsAt: IsoTimestampSchema.optional()
 });
 
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequestSchema>;
@@ -101,3 +150,6 @@ export type TroublemakerActionPayload = z.infer<typeof TroublemakerActionSchema>
 export type WaterGhostActionPayload = z.infer<typeof WaterGhostActionSchema>;
 export type VoteCastPayload = z.infer<typeof VoteCastSchema>;
 export type ChatSendPayload = z.infer<typeof ChatSendSchema>;
+export type PublicRoomViewPayload = z.infer<typeof PublicRoomViewSchema>;
+export type PrivateRoomViewPayload = z.infer<typeof PrivateRoomViewSchema>;
+export type SettlementViewPayload = z.infer<typeof SettlementViewSchema>;

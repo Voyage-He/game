@@ -48,11 +48,11 @@ export const PHASE_BY_ROLE: Partial<Record<Role, RolePhase>> = {
 
 export const DEFAULT_PHASE_DURATIONS_MS: Record<Exclude<Phase, 'free_speech' | 'settlement'>, number> = {
   close_eyes: 5000,
-  wolf_action: 10000,
-  seer_action: 10000,
-  robber_action: 10000,
-  troublemaker_action: 5000,
-  water_ghost_action: 5000,
+  wolf_action: 20000,
+  seer_action: 20000,
+  robber_action: 20000,
+  troublemaker_action: 20000,
+  water_ghost_action: 20000,
   open_eyes: 1000,
   voting: 60000
 };
@@ -165,11 +165,20 @@ export interface PublicRoomView {
   status: RoomStatus;
   version: number;
   players: PlayerPublicView[];
+  serverNow: string;
   phase?: Phase;
   phaseStartedAt?: string;
   phaseEndsAt?: string;
   phaseCompletion?: { currentRoleCompleted: boolean };
   voteCompletion?: { submittedCount: number; requiredCount: number };
+}
+
+export interface CountdownDisplaySnapshot {
+  phase?: Phase;
+  phaseEndsAt?: string;
+  serverNow?: string;
+  isTimed: boolean;
+  remainingSeconds: number | null;
 }
 
 export interface PrivateRoomView {

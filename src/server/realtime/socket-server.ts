@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { Server, type Namespace } from 'socket.io';
+import { Server, type Namespace, type Socket } from 'socket.io';
 import { SocketAuthSchema } from '../../shared/contracts.js';
 import { GameError } from '../../shared/errors.js';
 import { projectPrivateRoomView, projectPublicRoomView, projectSettlementView } from '../game/visibility.js';
@@ -63,6 +63,12 @@ export function configureSocketServer(httpServer: HttpServer, store: RoomStore, 
     registerRoomEventHandlers(socket, { store, timers, broadcastRoomState, broadcastSettlement });
     broadcastRoomState(roomCode);
 
+    // Re-emit settlement to newly connected sockets if room is already settled
+    const room = store.getRoom(roomCode);
+    if (room?.phase === 'settlement' && room.settlement) {
+      emitSettlementToSocket(namespace, socket, room);
+    }
+
     socket.on('disconnect', () => {
       const room = store.disconnectSocket(roomCode, socket.id);
       if (room) broadcastRoomState(roomCode);
@@ -88,5 +94,19 @@ export function emitRoomState(namespace: Namespace, store: RoomStore, roomCode: 
 export function emitSettlement(namespace: Namespace, room: Room): void {
   const settlement = projectSettlementView(room);
   if (!settlement) return;
+  // Broadcast to all sockets in the room
   namespace.to(room.roomCode).emit('settlement:shown', settlement);
+  // Also emit to each connected seat individually as a safety net
+  for (const seat of room.seats) {
+    if (!seat) continue;
+    for (const socketId of seat.socketIds) {
+      namespace.to(socketId).emit('settlement:shown', settlement);
+    }
+  }
+}
+
+export function emitSettlementToSocket(namespace: Namespace, socket: Socket, room: Room): void {
+  const settlement = projectSettlementView(room);
+  if (!settlement) return;
+  socket.emit('settlement:shown', settlement);
 }

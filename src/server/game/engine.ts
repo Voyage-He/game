@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { GameError } from '../../shared/errors.js';
 import {
   DEFAULT_PHASE_DURATIONS_MS,
@@ -20,6 +21,7 @@ import {
 export interface EngineOptions {
   now?: Date;
   seed?: string;
+  random?: () => number;
   phaseDurationsMs?: Partial<Record<Exclude<Phase, 'free_speech' | 'settlement'>, number>>;
   votingTimeoutMs?: number;
 }
@@ -93,12 +95,13 @@ export function createGameStateFactory(baseRoom: Room, options: EngineOptions = 
 
 export function initializeGame(baseRoom: Room, options: EngineOptions = {}): Room {
   const room = cloneRoom(baseRoom);
+  if (room.status !== 'waiting') throw new GameError('ROOM_UNAVAILABLE', '只有等待中的房间可以开始游戏。');
   const seats = occupiedSeats(room).sort((a, b) => a.seatIndex - b.seatIndex);
   if (seats.length !== 3 || seats.some((seat) => seat.connectionStatus !== 'connected')) {
     throw new GameError('ROOM_UNAVAILABLE', '需要三名已连接玩家才能开始游戏。');
   }
 
-  const shuffledRoles = shuffleRoles(options.seed ?? `${room.roomCode}:${room.version}`);
+  const shuffledRoles = shuffleRoles(options);
   const deck: IdentityCard[] = shuffledRoles.map((role, index) => {
     if (index < 3) {
       const seat = seats[index];
@@ -329,7 +332,7 @@ export function castVote(inputRoom: Room, voterSeatIndex: SeatIndex, targetSeatI
   if (room.phase !== 'voting') throw new GameError('INVALID_PHASE');
   const voter = getSeatByIndex(room, voterSeatIndex);
   const target = getSeatByIndex(room, targetSeatIndex);
-  if (voter.seatId === target.seatId) throw new GameError('INVALID_TARGET');
+  if (voter.seatId === target.seatId) throw new GameError('INVALID_TARGET', '不能投给自己，请选择其他玩家。');
   if (room.votes[voter.seatId]) throw new GameError('VOTE_ALREADY_SUBMITTED');
 
   const submittedAt = nowIso(options.now ?? new Date());
@@ -451,7 +454,7 @@ function prepareRoleAction(inputRoom: Room, seatIndex: SeatIndex, phase: RolePha
   const initialRole = getInitialRoleForSeat(room, actor);
   if (initialRole !== role) throw new GameError('INELIGIBLE_PLAYER');
   if (room.actions.some((action) => action.phase === phase && action.actingSeatId === actor.seatId)) {
-    throw new GameError('ACTION_WINDOW_CLOSED');
+    throw new GameError('ACTION_WINDOW_CLOSED', '你已经完成过本阶段身份行动。');
   }
   return room;
 }
@@ -498,11 +501,11 @@ function actionResult(phase: RolePhase, revealedCards: Array<{ location: string;
   return { phase, revealedCards, exchangePerformed };
 }
 
-function shuffleRoles(seed: string): Role[] {
+function shuffleRoles(options: Pick<EngineOptions, 'seed' | 'random'> = {}): Role[] {
   const roles = [...ROLES];
-  const random = seededRandom(seed);
+  const random = options.seed ? seededRandom(options.seed) : options.random;
   for (let i = roles.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
+    const j = random ? Math.floor(random() * (i + 1)) : crypto.randomInt(i + 1);
     const temp = roles[i];
     roles[i] = roles[j] as Role;
     roles[j] = temp as Role;

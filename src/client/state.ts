@@ -1,6 +1,13 @@
 import { io, type Socket } from 'socket.io-client';
-import type { ChatMessage, CreateRoomResponse, JoinRoomResponse, PrivateRoomView, PublicRoomView, ReconnectResponse, SettlementView } from '../shared/types.js';
+import type { ChatMessage, CountdownDisplaySnapshot, CreateRoomResponse, JoinRoomResponse, PrivateRoomView, PublicRoomView, ReconnectResponse, SettlementView } from '../shared/types.js';
 import type { ErrorCode } from '../shared/errors.js';
+
+export interface SelectionState {
+  actionSubmitted: boolean;
+  seerActionMode: 'idle' | 'underwater' | 'player';
+  seerUnderwaterClicked: number[];
+  troublemakerSelected: number[];
+}
 
 export interface ClientStateSnapshot {
   publicView: PublicRoomView | null;
@@ -11,6 +18,9 @@ export interface ClientStateSnapshot {
   currentRoomCode: string | null;
   currentSeatIndex: number | null;
   connected: boolean;
+  serverClockOffsetMs: number;
+  animatedCardKeys: Set<string>;
+  selectionState: SelectionState;
 }
 
 export class ClientState {
@@ -24,7 +34,15 @@ export class ClientState {
     error: null,
     currentRoomCode: null,
     currentSeatIndex: null,
-    connected: false
+    connected: false,
+    serverClockOffsetMs: 0,
+    animatedCardKeys: new Set(),
+    selectionState: {
+      actionSubmitted: false,
+      seerActionMode: 'idle',
+      seerUnderwaterClicked: [],
+      troublemakerSelected: []
+    }
   };
 
   subscribe(listener: () => void): () => void {
@@ -34,6 +52,10 @@ export class ClientState {
 
   getSnapshot(): ClientStateSnapshot {
     return this.snapshot;
+  }
+
+  getCountdownSnapshot(): CountdownDisplaySnapshot {
+    return buildCountdownSnapshot(this.snapshot);
   }
 
   async createRoom(nickname: string): Promise<void> {
@@ -81,6 +103,11 @@ export class ClientState {
     this.emitChange();
   }
 
+  updateCardSelection(updates: Partial<SelectionState>): void {
+    Object.assign(this.snapshot.selectionState, updates);
+    this.emitChange();
+  }
+
   cleanupToken(roomCode: string): void {
     localStorage.removeItem(tokenKey(roomCode));
     localStorage.removeItem(seatKey(roomCode));
@@ -97,7 +124,8 @@ export class ClientState {
       currentRoomCode: roomCode,
       currentSeatIndex: Number(localStorage.getItem(seatKey(roomCode)) ?? 0),
       connected: false,
-      error: null
+      error: null,
+      serverClockOffsetMs: 0
     };
     this.emitChange();
 
@@ -123,12 +151,29 @@ export class ClientState {
     });
 
     this.socket.on('state:public', (view: PublicRoomView) => {
+      const serverNowMs = Date.parse(view.serverNow);
       this.snapshot.publicView = view;
       this.snapshot.currentRoomCode = view.roomCode;
+      if (Number.isFinite(serverNowMs)) {
+        this.snapshot.serverClockOffsetMs = serverNowMs - Date.now();
+      }
       this.emitChange();
     });
 
     this.socket.on('state:private', (view: PrivateRoomView) => {
+      // Clear animation tracking when revealedCards become empty (phase change)
+      if (view.revealedCards.length === 0) {
+        this.snapshot.animatedCardKeys = new Set();
+      }
+      // Clear selection state when phase changes or action no longer eligible
+      if (view.revealedCards.length === 0 || view.currentEligibleAction === null) {
+        this.snapshot.selectionState = {
+          actionSubmitted: false,
+          seerActionMode: 'idle',
+          seerUnderwaterClicked: [],
+          troublemakerSelected: []
+        };
+      }
       this.snapshot.privateView = view;
       this.snapshot.currentSeatIndex = view.seatIndex;
       this.emitChange();
@@ -167,6 +212,32 @@ export class ClientState {
 }
 
 export const clientState = new ClientState();
+
+export function isTimedPhaseView(view: PublicRoomView | null | undefined): boolean {
+  return Boolean(view?.phaseEndsAt && view.phase !== 'free_speech' && view.phase !== 'settlement');
+}
+
+export function remainingSecondsForDeadline(phaseEndsAt: string | undefined, serverClockOffsetMs: number, nowMs = Date.now()): number | null {
+  if (!phaseEndsAt) return null;
+  const deadlineMs = Date.parse(phaseEndsAt);
+  if (!Number.isFinite(deadlineMs)) return null;
+  const estimatedServerNow = nowMs + serverClockOffsetMs;
+  return Math.max(0, Math.ceil((deadlineMs - estimatedServerNow) / 1000));
+}
+
+export function buildCountdownSnapshot(snapshot: ClientStateSnapshot): CountdownDisplaySnapshot {
+  const view = snapshot.publicView;
+  if (!view || !isTimedPhaseView(view)) {
+    return { phase: view?.phase, phaseEndsAt: view?.phaseEndsAt, serverNow: view?.serverNow, isTimed: false, remainingSeconds: null };
+  }
+  return {
+    phase: view.phase,
+    phaseEndsAt: view.phaseEndsAt,
+    serverNow: view.serverNow,
+    isTimed: true,
+    remainingSeconds: remainingSecondsForDeadline(view.phaseEndsAt, snapshot.serverClockOffsetMs)
+  };
+}
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {

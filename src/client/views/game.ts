@@ -1,6 +1,6 @@
-import type { ClientStateSnapshot } from '../state.js';
-import type { PrivateRoomView, PublicRoomView } from '../../shared/types.js';
-import { escapeHtml, formatPhase } from './util.js';
+import { buildCountdownSnapshot, clientState, type ClientStateSnapshot, type SelectionState } from '../state.js';
+import type { PrivateRoomView, PublicRoomView, RolePhase, SettlementView } from '../../shared/types.js';
+import { FREE_SPEECH_TEXT, ROLE_ACTION_LABELS, VOTING_WAIT_TEXT, WAITING_ACTION_TEXT, escapeHtml, formatPhase, getActionPrompt, getRevealedRole, getSelectionProgress } from './util.js';
 
 export function renderGame(snapshot: ClientStateSnapshot): string {
   const publicView = snapshot.publicView;
@@ -10,17 +10,15 @@ export function renderGame(snapshot: ClientStateSnapshot): string {
   const isOwner = Boolean(ownPlayer?.isOwner);
   const canAdvance = isOwner && publicView.phase === 'free_speech';
   return `
-    <section class="panel game-panel" aria-labelledby="game-title">
-      <h1 id="game-title">房间 ${escapeHtml(publicView.roomCode)}</h1>
+    <section class="panel game-panel">
       ${snapshot.error ? `<p role="alert" class="error">${escapeHtml(snapshot.error)}</p>` : ''}
       <div class="phase-card">
-        <span class="badge">当前阶段</span>
-        <h2>${formatPhase(publicView.phase)}</h2>
-        ${renderTimer(publicView)}
+        <h2><span class="badge phase-badge">当前阶段</span>${formatPhase(publicView.phase)}</h2>
+        ${renderTimer(snapshot)}
       </div>
-      ${renderPlayers(publicView, privateView)}
-      ${privateView?.initialRole ? `<p class="own-role">你的初始身份：<strong>${escapeHtml(privateView.initialRole)}</strong></p>` : ''}
-      ${renderActionPanel(publicView, privateView)}
+      ${renderPlayers(publicView, privateView, snapshot.animatedCardKeys, snapshot.selectionState, snapshot.settlement)}
+      ${privateView?.initialRole && !snapshot.settlement ? `<p class="own-role">你的初始身份：<strong>${escapeHtml(privateView.initialRole)}</strong></p>` : ''}
+      ${renderActionPanel(publicView, privateView, snapshot.selectionState)}
       ${publicView.phase === 'free_speech' ? `<button id="advance-vote" ${canAdvance ? '' : 'disabled'}>进入投票</button>` : ''}
       ${renderVoting(publicView, privateView)}
       ${renderSettlement(snapshot)}
@@ -28,51 +26,222 @@ export function renderGame(snapshot: ClientStateSnapshot): string {
   `;
 }
 
-function renderPlayers(publicView: PublicRoomView, privateView: PrivateRoomView | null): string {
-  return `<ul class="players">${publicView.players
-    .map((player) => `<li class="${player.seatIndex === privateView?.seatIndex ? 'self' : ''}"><span>席位 ${player.seatIndex + 1}</span><strong>${escapeHtml(player.nickname)}</strong>${player.isOwner ? '<span class="badge">房主</span>' : ''}<span class="status ${player.connectionStatus}">${player.connectionStatus === 'connected' ? '在线' : '离线'}</span></li>`)
-    .join('')}</ul>`;
+function renderPlayers(publicView: PublicRoomView, privateView: PrivateRoomView | null, animatedCardKeys: Set<string>, selectionState: SelectionState, settlement: SettlementView | null): string {
+  const revealedCards = privateView?.revealedCards ?? [];
+  const ownSeatIndex = privateView?.seatIndex;
+  const initialRole = privateView?.initialRole;
+  const currentEligibleAction = privateView?.currentEligibleAction ?? null;
+
+  // Build settlement lookup maps for final roles
+  const finalPlayerRoles = new Map<number, string>();
+  const finalUnderwaterRoles = new Map<number, string>();
+  if (settlement) {
+    for (const card of settlement.finalPlayerCards) {
+      finalPlayerRoles.set(card.seatIndex, card.role);
+    }
+    for (const card of settlement.finalUnderwaterCards) {
+      finalUnderwaterRoles.set(card.index, card.role);
+    }
+  }
+
+  return `
+    ${renderUnderwaterCards(revealedCards, animatedCardKeys, selectionState, currentEligibleAction, finalUnderwaterRoles)}
+    <div class="players-grid">${publicView.players
+      .map((player) => renderPlayerCard(player, ownSeatIndex, initialRole, revealedCards, animatedCardKeys, selectionState, currentEligibleAction, finalPlayerRoles.get(player.seatIndex)))
+      .join('')}</div>`;
 }
 
-function renderTimer(publicView: PublicRoomView): string {
-  if (!publicView.phaseEndsAt) return '<p class="muted">该阶段没有自动倒计时。</p>';
-  const remaining = Math.max(0, Math.ceil((new Date(publicView.phaseEndsAt).getTime() - Date.now()) / 1000));
-  return `<p class="timer">剩余约 <strong>${remaining}</strong> 秒</p>`;
+function renderPlayerCard(
+  player: { seatIndex: number; nickname: string; isOwner: boolean; connectionStatus: string },
+  ownSeatIndex: number | undefined,
+  initialRole: string | null | undefined,
+  revealedCards: Array<{ location: string; role: string }>,
+  animatedCardKeys: Set<string>,
+  selectionState: SelectionState,
+  currentEligibleAction: { phase: string; options: string[] } | null,
+  finalRole?: string
+): string {
+  const isSelf = player.seatIndex === ownSeatIndex;
+  const isDisconnected = player.connectionStatus === 'disconnected';
+
+  let cardLocation: string;
+  let roleForCardFront: string | null = null;
+
+  // Settlement: show final role for every player
+  if (finalRole !== undefined) {
+    cardLocation = `playerSeat:${player.seatIndex}:final`;
+    roleForCardFront = finalRole;
+  } else if (isSelf) {
+    // Own card always shows initial role (always present in revealedCards via buildRevealedCards)
+    cardLocation = `playerSeat:${player.seatIndex}:initial`;
+    roleForCardFront = getRevealedRole(cardLocation, revealedCards) ?? initialRole ?? null;
+  } else {
+    cardLocation = `playerSeat:${player.seatIndex}`;
+    roleForCardFront = getRevealedRole(cardLocation, revealedCards);
+  }
+
+  const isFlipped = roleForCardFront !== null;
+  const isSettlement = finalRole !== undefined;
+  const flipAnimationClass = isSettlement ? 'card-flip-in' : getFlipAnimationClass(cardLocation, isFlipped, animatedCardKeys);
+  const interactionClass = isSettlement ? '' : getCardInteractionClass(currentEligibleAction?.phase, 'player', player.seatIndex, ownSeatIndex, selectionState, currentEligibleAction);
+
+  return `
+    <div class="player-card${isDisconnected ? ' disconnected' : ''}" data-seat-index="${player.seatIndex}">
+      ${renderCardElement(cardLocation, roleForCardFront, isFlipped, flipAnimationClass, interactionClass, 'player')}
+      <div class="player-card-header">
+        <span class="player-nickname">${escapeHtml(player.nickname)}</span>
+        <span class="player-badges">
+          ${player.isOwner ? '<span class="badge">房主</span>' : ''}
+          ${isDisconnected ? '<span class="badge">离线</span>' : ''}
+          ${isSelf ? '<span class="badge" style="background:#2454d6;color:white">你</span>' : ''}
+        </span>
+      </div>
+    </div>`;
 }
 
-function renderActionPanel(publicView: PublicRoomView, privateView: PrivateRoomView | null): string {
+function renderUnderwaterCards(revealedCards: Array<{ location: string; role: string }>, animatedCardKeys: Set<string>, selectionState: SelectionState, currentEligibleAction: { phase: string; options: string[] } | null, finalUnderwaterRoles?: Map<number, string>): string {
+  const isSettlement = finalUnderwaterRoles !== undefined && finalUnderwaterRoles.size > 0;
+  return `
+    <div class="underwater-cards">
+      <h3>水下的牌</h3>
+      <div class="underwater-cards-grid">
+        ${[0, 1, 2]
+          .map((index) => {
+            const location = `underwater:${index}`;
+            let role: string | null = null;
+            let flipAnimationClass = '';
+            let interactionClass = '';
+            if (isSettlement) {
+              role = finalUnderwaterRoles!.get(index) ?? null;
+              flipAnimationClass = 'card-flip-in';
+            } else {
+              role = getRevealedRole(location, revealedCards);
+              const isFlipped = role !== null;
+              flipAnimationClass = getFlipAnimationClass(location, isFlipped, animatedCardKeys);
+              interactionClass = getCardInteractionClass(currentEligibleAction?.phase, 'underwater', index, undefined, selectionState, currentEligibleAction);
+            }
+            const isFlipped = role !== null;
+            return `
+              <div class="underwater-card" data-underwater-index="${index}">
+                ${renderCardElement(location, role, isFlipped, flipAnimationClass, interactionClass, 'underwater')}
+                <span class="underwater-label">水下 ${index + 1}</span>
+              </div>`;
+          })
+          .join('')}
+      </div>
+    </div>`;
+}
+
+function getFlipAnimationClass(location: string, isFlipped: boolean, animatedCardKeys: Set<string>): string {
+  if (!isFlipped) return '';
+  if (animatedCardKeys.has(location)) return '';
+  // First time this card is revealed in this phase → add flip-in animation
+  animatedCardKeys.add(location);
+  return 'card-flip-in';
+}
+
+function renderCardElement(location: string, role: string | null, isFlipped: boolean, flipAnimationClass = '', interactionClass = '', kind: 'player' | 'underwater' = 'player'): string {
+  const kindClass = kind === 'underwater' ? 'card-underwater' : 'card-player';
+  const classes = ['card', kindClass, flipAnimationClass, interactionClass].filter(Boolean).join(' ');
+  const backEmoji = kind === 'underwater' ? '🌊' : '🃏';
+  return `
+    <div class="${classes}" data-flipped="${isFlipped}" data-location="${escapeHtml(location)}">
+      <div class="card-inner">
+        <div class="card-back">${backEmoji}</div>
+        <div class="card-front">
+          <span class="card-role">${role ? escapeHtml(role) : '?'}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderTimer(snapshot: ClientStateSnapshot): string {
+  const publicView = snapshot.publicView;
+  if (!publicView) return '';
+  if (publicView.phase === 'free_speech') return `<p class="muted">${FREE_SPEECH_TEXT}</p>`;
+  if (publicView.phase === 'settlement') return '<p class="muted">对局已结算，没有倒计时。</p>';
+  const countdown = buildCountdownSnapshot(snapshot);
+  if (!countdown.isTimed) return '<p class="muted">该阶段没有自动倒计时。</p>';
+  return `<p class="timer" aria-live="polite">剩余 <strong>${countdown.remainingSeconds ?? 0}</strong> 秒</p>`;
+}
+
+function renderActionPanel(publicView: PublicRoomView, privateView: PrivateRoomView | null, selectionState: SelectionState): string {
   const action = privateView?.currentEligibleAction;
   if (!action || publicView.phase !== action.phase) {
-    if (publicView.phase?.endsWith('_action')) return '<section class="action-panel neutral"><h2>身份行动</h2><p>请等待当前身份玩家行动。不会显示私密行动内容。</p></section>';
+    if (publicView.phase?.endsWith('_action')) return `<section class="action-panel neutral"><h2>其他玩家行动中</h2><p>${WAITING_ACTION_TEXT}</p></section>`;
     return '';
   }
-  switch (action.phase) {
+  const prompt = getActionPrompt(action.phase, selectionState);
+  const progress = getSelectionProgress(action.phase, selectionState);
+  const title = ROLE_ACTION_LABELS[action.phase as RolePhase] ?? action.phase;
+  return `<section class="action-panel">
+    <h2>${escapeHtml(title)} · 轮到你行动</h2>
+    <p>${escapeHtml(prompt)}</p>
+    ${progress ? `<p class="selection-progress">${escapeHtml(progress)}</p>` : ''}
+  </section>`;
+}
+
+function isCardClickable(
+  phase: string | undefined,
+  cardKind: 'player' | 'underwater',
+  targetIndex: number,
+  ownSeatIndex: number | undefined,
+  sel: SelectionState,
+  currentEligibleAction: { phase: string; options: string[] } | null
+): boolean {
+  if (!currentEligibleAction || sel.actionSubmitted) return false;
+  switch (currentEligibleAction.phase) {
     case 'wolf_action':
-      return actionWrapper('狼人行动', underwaterButtons('action:wolf', 'underwaterIndex'));
+      return cardKind === 'underwater';
     case 'seer_action':
-      return actionWrapper('预言家行动', `
-        <button data-action="action:seer" data-payload='{"mode":"view_two_underwater","underwaterIndexes":[0,1]}'>查看水下 1+2</button>
-        <button data-action="action:seer" data-payload='{"mode":"view_two_underwater","underwaterIndexes":[0,2]}'>查看水下 1+3</button>
-        <button data-action="action:seer" data-payload='{"mode":"view_two_underwater","underwaterIndexes":[1,2]}'>查看水下 2+3</button>
-        ${playerTargetButtons(publicView, privateView.seatIndex, 'action:seer', 'targetSeatIndex', { mode: 'view_one_player' })}
-      `);
+      if (cardKind === 'underwater') {
+        return sel.seerActionMode !== 'player' && !sel.seerUnderwaterClicked.includes(targetIndex) && sel.seerUnderwaterClicked.length < 2;
+      }
+      return sel.seerActionMode !== 'underwater' && targetIndex !== ownSeatIndex;
     case 'robber_action':
-      return actionWrapper('强盗行动', playerTargetButtons(publicView, privateView.seatIndex, 'action:robber', 'targetSeatIndex'));
-    case 'troublemaker_action': {
-      const targets = publicView.players.filter((player) => player.seatIndex !== privateView.seatIndex).map((player) => player.seatIndex);
-      return actionWrapper('捣蛋鬼行动', `<button data-action="action:troublemaker" data-payload='${JSON.stringify({ targetSeatIndexes: targets })}'>交换另外两名玩家</button>`);
-    }
+      return cardKind === 'player' && targetIndex !== ownSeatIndex;
+    case 'troublemaker_action':
+      return cardKind === 'player' && targetIndex !== ownSeatIndex;
     case 'water_ghost_action':
-      return actionWrapper('水鬼行动', underwaterButtons('action:water-ghost', 'underwaterIndex'));
+      return cardKind === 'underwater';
     default:
-      return '';
+      return false;
   }
+}
+
+function isCardSelected(
+  cardKind: 'player' | 'underwater',
+  targetIndex: number,
+  sel: SelectionState
+): boolean {
+  if (cardKind === 'player') return sel.troublemakerSelected.includes(targetIndex);
+  return sel.seerUnderwaterClicked.includes(targetIndex);
+}
+
+function getCardInteractionClass(
+  phase: string | undefined,
+  cardKind: 'player' | 'underwater',
+  targetIndex: number,
+  ownSeatIndex: number | undefined,
+  sel: SelectionState,
+  currentEligibleAction: { phase: string; options: string[] } | null
+): string {
+  if (sel.actionSubmitted) return 'submitted';
+  const classes: string[] = [];
+  if (isCardClickable(phase, cardKind, targetIndex, ownSeatIndex, sel, currentEligibleAction)) {
+    classes.push('clickable');
+  }
+  if (isCardSelected(cardKind, targetIndex, sel)) {
+    classes.push('selected');
+  }
+  return classes.join(' ');
 }
 
 function renderVoting(publicView: PublicRoomView, privateView: PrivateRoomView | null): string {
   if (publicView.phase !== 'voting' || !privateView) return '';
   const submitted = Boolean(privateView.submittedVote);
-  return `<section class="vote-panel"><h2>投票</h2><p>${submitted ? `你已投给席位 ${privateView.submittedVote!.targetSeatIndex + 1}` : '请选择一名其他玩家投票。'}</p>${publicView.players
+  const progress = publicView.voteCompletion ? `投票进度：${publicView.voteCompletion.submittedCount}/${publicView.voteCompletion.requiredCount}` : '投票进度：等待同步';
+  return `<section class="vote-panel"><h2>投票</h2><p class="vote-progress">${progress}</p><p>${submitted ? `你已投给席位 ${privateView.submittedVote!.targetSeatIndex + 1}` : VOTING_WAIT_TEXT}</p>${publicView.players
     .filter((player) => player.seatIndex !== privateView.seatIndex)
     .map((player) => `<button data-vote="${player.seatIndex}" ${submitted ? 'disabled' : ''}>投给 ${escapeHtml(player.nickname)}</button>`)
     .join('')}</section>`;
@@ -81,22 +250,136 @@ function renderVoting(publicView: PublicRoomView, privateView: PrivateRoomView |
 function renderSettlement(snapshot: ClientStateSnapshot): string {
   const settlement = snapshot.settlement;
   if (!settlement) return '';
-  return `<section class="settlement"><h2>结算</h2><p>胜利阵营：<strong>${escapeHtml(settlement.winningCamp)}</strong></p><p>出局：${settlement.eliminatedSeatIndex === null ? '无人出局' : `席位 ${settlement.eliminatedSeatIndex + 1}`}</p><h3>投票</h3><ul>${settlement.voteTotals.map((total) => `<li>席位 ${total.seatIndex + 1}: ${total.votes} 票</li>`).join('')}</ul><h3>最终身份</h3><ul>${settlement.finalPlayerCards.map((card) => `<li>席位 ${card.seatIndex + 1} ${escapeHtml(card.nickname)}：${escapeHtml(card.role)}</li>`).join('')}</ul><h3>水下的牌</h3><ul>${settlement.finalUnderwaterCards.map((card) => `<li>水下 ${card.index + 1}：${escapeHtml(card.role)}</li>`).join('')}</ul>${settlement.automaticVotes.length ? `<p class="badge">包含自动投票 ${settlement.automaticVotes.length} 个</p>` : ''}${settlement.automaticActions.length ? `<p class="badge">包含自动身份行动 ${settlement.automaticActions.length} 个</p>` : ''}</section>`;
+  const winnerClass = settlement.winningCamp === '狼人' ? 'settlement-wolf-wins' : 'settlement-good-wins';
+  return `<section class="settlement ${winnerClass}">
+    <h2>结算</h2>
+    <p>胜利阵营：<strong>${escapeHtml(settlement.winningCamp)}</strong></p>
+    <p>出局：${settlement.eliminatedSeatIndex === null ? '无人出局' : `席位 ${settlement.eliminatedSeatIndex + 1}`}</p>
+    <ul>${settlement.voteTotals.map((total) => `<li>席位 ${total.seatIndex + 1}: ${total.votes} 票</li>`).join('')}</ul>
+    ${settlement.automaticVotes.length ? `<p class="badge">包含自动投票 ${settlement.automaticVotes.length} 个</p>` : ''}${settlement.automaticActions.length ? `<p class="badge">包含自动身份行动 ${settlement.automaticActions.length} 个</p>` : ''}
+  </section>`;
 }
 
-function actionWrapper(title: string, buttons: string): string {
-  return `<section class="action-panel"><h2>${escapeHtml(title)}</h2><p>只有你能看到并提交这些选择。</p><div class="actions">${buttons}</div></section>`;
+export function bindCardClickHandlers(): void {
+  const underwaterGrid = document.querySelector('.underwater-cards-grid');
+  const playersGrid = document.querySelector('.players-grid');
+
+  function handleClick(event: Event): void {
+    const snap = clientState.getSnapshot();
+    const action = snap.privateView?.currentEligibleAction;
+    if (!action) return;
+
+    const sel = snap.selectionState;
+    if (sel.actionSubmitted) return;
+
+    const target = event.target as HTMLElement;
+    const ownSeatIndex = snap.privateView?.seatIndex;
+
+    // Check underwater card click
+    const underwaterCard = target.closest('.underwater-card');
+    if (underwaterCard) {
+      const idxStr = underwaterCard.getAttribute('data-underwater-index');
+      if (idxStr === null) return;
+      const idx = parseInt(idxStr, 10);
+      if (isNaN(idx)) return;
+      handleUnderwaterClick(action.phase, idx, ownSeatIndex, sel);
+      return;
+    }
+
+    // Check player card click
+    const playerCard = target.closest('.player-card');
+    if (playerCard) {
+      const idxStr = playerCard.getAttribute('data-seat-index');
+      if (idxStr === null) return;
+      const seatIdx = parseInt(idxStr, 10);
+      if (isNaN(seatIdx)) return;
+      handlePlayerClick(action.phase, seatIdx, ownSeatIndex, sel);
+    }
+  }
+
+  underwaterGrid?.addEventListener('click', handleClick);
+  playersGrid?.addEventListener('click', handleClick);
 }
 
-function underwaterButtons(action: string, property: string): string {
-  return [0, 1, 2]
-    .map((index) => `<button data-action="${action}" data-payload='${JSON.stringify({ [property]: index })}'>选择水下 ${index + 1}</button>`)
-    .join('');
+function handleUnderwaterClick(phase: string, idx: number, ownSeatIndex: number | undefined, sel: SelectionState): void {
+  switch (phase) {
+    case 'wolf_action':
+      clientState.sendRoleAction('action:wolf', { underwaterIndex: idx });
+      clientState.updateCardSelection({ actionSubmitted: true });
+      break;
+    case 'seer_action':
+      if (sel.seerActionMode === 'player') return; // locked to player mode
+      if (sel.seerUnderwaterClicked.includes(idx)) return; // already clicked
+      if (sel.seerUnderwaterClicked.length >= 2) return; // max 2
+
+      if (sel.seerUnderwaterClicked.length === 0) {
+        // First underwater click — record locally, no server event yet
+        clientState.updateCardSelection({
+          seerActionMode: 'underwater',
+          seerUnderwaterClicked: [idx]
+        });
+      } else {
+        // Second distinct underwater click — submit both
+        const both = [sel.seerUnderwaterClicked[0], idx];
+        clientState.sendRoleAction('action:seer', {
+          mode: 'view_two_underwater',
+          underwaterIndexes: both
+        });
+        clientState.updateCardSelection({
+          seerActionMode: 'underwater',
+          seerUnderwaterClicked: both,
+          actionSubmitted: true
+        });
+      }
+      break;
+    case 'water_ghost_action':
+      clientState.sendRoleAction('action:water-ghost', { underwaterIndex: idx });
+      clientState.updateCardSelection({ actionSubmitted: true });
+      break;
+  }
 }
 
-function playerTargetButtons(publicView: PublicRoomView, ownSeatIndex: number, action: string, property: string, extra: Record<string, unknown> = {}): string {
-  return publicView.players
-    .filter((player) => player.seatIndex !== ownSeatIndex)
-    .map((player) => `<button data-action="${action}" data-payload='${JSON.stringify({ ...extra, [property]: player.seatIndex })}'>选择 ${escapeHtml(player.nickname)}</button>`)
-    .join('');
+function handlePlayerClick(phase: string, seatIdx: number, ownSeatIndex: number | undefined, sel: SelectionState): void {
+  if (seatIdx === ownSeatIndex) return; // Can't target self
+
+  switch (phase) {
+    case 'seer_action':
+      if (sel.seerActionMode === 'underwater') return; // locked to underwater mode
+      if (sel.seerActionMode !== 'idle') return; // already acted
+      clientState.sendRoleAction('action:seer', {
+        mode: 'view_one_player',
+        targetSeatIndex: seatIdx
+      });
+      clientState.updateCardSelection({
+        seerActionMode: 'player',
+        actionSubmitted: true
+      });
+      break;
+    case 'robber_action':
+      clientState.sendRoleAction('action:robber', { targetSeatIndex: seatIdx });
+      clientState.updateCardSelection({ actionSubmitted: true });
+      break;
+    case 'troublemaker_action':
+      if (sel.troublemakerSelected.includes(seatIdx)) {
+        // Deselect
+        clientState.updateCardSelection({
+          troublemakerSelected: sel.troublemakerSelected.filter(s => s !== seatIdx)
+        });
+      } else if (sel.troublemakerSelected.length === 0) {
+        // First selection
+        clientState.updateCardSelection({
+          troublemakerSelected: [seatIdx]
+        });
+      } else if (sel.troublemakerSelected.length === 1) {
+        // Second selection — submit
+        clientState.sendRoleAction('action:troublemaker', {
+          targetSeatIndexes: [sel.troublemakerSelected[0], seatIdx]
+        });
+        clientState.updateCardSelection({
+          troublemakerSelected: [...sel.troublemakerSelected, seatIdx],
+          actionSubmitted: true
+        });
+      }
+      break;
+  }
 }

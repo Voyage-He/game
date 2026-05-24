@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PlayerSeat, Role, Room, SeatIndex } from '../../src/shared/types.js';
+import { ROLES, type PlayerSeat, type Role, type Room, type SeatIndex } from '../../src/shared/types.js';
 import { GameError } from '../../src/shared/errors.js';
 import {
   advanceFreeSpeechToVoting,
@@ -16,6 +16,7 @@ import {
   performWolfAction,
   setPhase
 } from '../../src/server/game/engine.js';
+import { makeWaitingThreePlayerRoom } from '../helpers/room-fixtures.js';
 
 function makeRoom(playerRoles: Role[] = ['狼人', '预言家', '强盗'], underwaterRoles: Role[] = ['捣蛋鬼', '水鬼', '平民']): Room {
   const now = new Date('2026-05-21T12:00:00.000Z').toISOString();
@@ -125,6 +126,32 @@ describe('game engine phase, deal, voting, and settlement', () => {
       expect(room.settlement?.finalUnderwaterCards).toHaveLength(3);
       expect(['好人', '狼人']).toContain(room.settlement?.winningCamp);
     }
+  });
+});
+
+describe('fresh identity allocation', () => {
+  it('uses all six unique roles and does not fix a seat to one identity across 100 new games', () => {
+    const rolesBySeat = [new Set<Role>(), new Set<Role>(), new Set<Role>()];
+
+    for (let i = 0; i < 100; i += 1) {
+      const started = initializeGame(makeWaitingThreePlayerRoom({ roomCode: 'FIXED1', version: 1 }), instantOptions);
+      expect(new Set(started.deck.map((card) => card.role))).toEqual(new Set(ROLES));
+      for (const seat of started.seats) {
+        if (!seat?.initialCardId) continue;
+        const role = started.deck.find((card) => card.cardId === seat.initialCardId)?.role;
+        expect(role).toBeTruthy();
+        rolesBySeat[seat.seatIndex]!.add(role!);
+      }
+    }
+
+    expect(rolesBySeat.every((roles) => roles.size > 1)).toBe(true);
+  });
+
+  it('keeps explicit test seed allocation deterministic', () => {
+    const first = initializeGame(makeWaitingThreePlayerRoom({ roomCode: 'FIXED1', version: 1 }), { ...instantOptions, seed: 'unit-seed' });
+    const second = initializeGame(makeWaitingThreePlayerRoom({ roomCode: 'FIXED1', version: 1 }), { ...instantOptions, seed: 'unit-seed' });
+
+    expect(first.deck.map((card) => `${card.initialLocation}:${card.role}`)).toEqual(second.deck.map((card) => `${card.initialLocation}:${card.role}`));
   });
 });
 

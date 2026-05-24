@@ -8,6 +8,14 @@
 
 **Input**: User description: "to clarify MVP role-action scope and voting timeout."
 
+## Constitution Alignment *(mandatory)*
+
+- **服务端权威与规则一致性**: MVP 澄清要求服务端完整执行身份行动、自动必选行动、投票超时和最终身份结算。
+- **临时数据与隐私最小化**: 该澄清不新增持久数据；私密身份和行动结果在结算前仍只对授权席位可见。
+- **测试先行与契约可验证**: 完整身份行动、隐藏信息、自动投票、无效投票和 60 秒超时必须通过自动化测试验证。
+- **简洁自托管架构**: 该澄清不引入新服务、账号、数据库、公开大厅、旁观者或非必要 UI 范围。
+- **清晰中文体验与实时可用性**: 玩家看到的投票倒计时、自动投票标记和错误反馈必须使用清晰中文；后续编辑应将非技术正文优先转为中文。
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - MVP includes complete role actions (Priority: P1)
