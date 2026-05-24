@@ -147,6 +147,21 @@ export class AuthStore {
     return [...this.inviteCodes.values()];
   }
 
+  /** 是否有任何已注册用户？ */
+  hasUsers(): boolean {
+    return this.users.size > 0;
+  }
+
+  /** 获取还未被使用的初始邀请码（来自环境变量 INVITE_CODE） */
+  getInitialInviteCode(): string | null {
+    const code = process.env.INVITE_CODE;
+    if (!code) return null;
+    const record = this.inviteCodes.get(code);
+    if (!record) return null;
+    if (record.usedBy !== null) return null; // 已被使用
+    return code;
+  }
+
   /* ── 内部 ── */
 
   private createSession(username: string): string {
