@@ -14,11 +14,13 @@ export function renderLobby(snapshot: ClientStateSnapshot): string {
   const isOwner = Boolean(ownPlayer?.isOwner);
   const canStart = canStartGame(snapshot.publicView?.status, isOwner, players);
 
+  const inRoom = Boolean(snapshot.publicView);
   return `
     <section class="panel lobby-panel" aria-labelledby="lobby-title">
       <h1 id="lobby-title">🃏 在线房间游戏</h1>
       <p class="muted">三人邀请制房间。使用昵称和房间码开始一局临时游戏。</p>
       ${snapshot.error ? `<p role="alert" class="error">${escapeHtml(snapshot.error)}</p>` : ''}
+      ${inRoom ? '' : `
       <div class="forms">
         <form id="create-form" class="card-form">
           <h2>创建房间</h2>
@@ -37,14 +39,15 @@ export function renderLobby(snapshot: ClientStateSnapshot): string {
           <button type="submit">重连</button>
         </form>
       </div>
-      ${roomCode ? renderWaitingRoomCard(roomCode, players, ownSeatIndex, isOwner, canStart, Boolean(snapshot.publicView)) : ''}
+      `}
+      ${roomCode ? renderWaitingRoomCard(roomCode, players, ownSeatIndex, isOwner, canStart, inRoom) : ''}
     </section>
   `;
 }
 
-function renderWaitingRoomCard(roomCode: string, players: LobbyPlayer[], ownSeatIndex: number | null, isOwner: boolean, canStart: boolean, hasSyncedRoomState: boolean): string {
+function renderWaitingRoomCard(roomCode: string, players: LobbyPlayer[], ownSeatIndex: number | null, isOwner: boolean, canStart: boolean, inRoom: boolean): string {
   const connectedCount = players.filter((player) => player.connectionStatus === 'connected').length;
-  const startHint = getStartHint(players, isOwner, canStart, hasSyncedRoomState);
+  const startHint = getStartHint(players, isOwner, canStart, inRoom);
   return `<section class="room-card waiting-room-card" aria-labelledby="waiting-room-title">
     <div class="room-card-header">
       <h2 id="waiting-room-title">房间码 <strong class="room-code">${escapeHtml(roomCode)}</strong></h2>
@@ -53,7 +56,8 @@ function renderWaitingRoomCard(roomCode: string, players: LobbyPlayer[], ownSeat
     <p id="start-game-hint" class="start-hint${canStart ? ' ready' : ''}">${escapeHtml(startHint)}</p>
     ${renderPlayers(players, ownSeatIndex)}
     <div class="start-actions">
-      ${renderStartControl(isOwner, canStart, hasSyncedRoomState)}
+      ${renderStartControl(isOwner, canStart, inRoom)}
+      ${inRoom ? '<button id="leave-room">退出房间</button>' : ''}
     </div>
   </section>`;
 }
@@ -80,8 +84,8 @@ function renderPlayers(players: LobbyPlayer[], ownSeatIndex: number | null): str
     .join('')}</ul>`;
 }
 
-function renderStartControl(isOwner: boolean, canStart: boolean, hasSyncedRoomState: boolean): string {
-  if (!hasSyncedRoomState) return '<p class="muted owner-wait">正在同步开始条件。</p>';
+function renderStartControl(isOwner: boolean, canStart: boolean, inRoom: boolean): string {
+  if (!inRoom) return '<p class="muted owner-wait">正在同步开始条件。</p>';
   if (!isOwner) return '<p class="muted owner-wait">等待房主开始游戏。</p>';
   return `<button id="start-game" aria-describedby="start-game-hint" ${canStart ? '' : 'disabled'}>房主开始游戏</button>`;
 }
@@ -90,8 +94,8 @@ function canStartGame(status: string | undefined, isOwner: boolean, players: Lob
   return Boolean(isOwner && status === 'waiting' && players.length === REQUIRED_PLAYERS && players.every((player) => player.connectionStatus === 'connected'));
 }
 
-function getStartHint(players: LobbyPlayer[], isOwner: boolean, canStart: boolean, hasSyncedRoomState: boolean): string {
-  if (!hasSyncedRoomState) return '正在同步房间人员信息，请稍候。';
+function getStartHint(players: LobbyPlayer[], isOwner: boolean, canStart: boolean, inRoom: boolean): string {
+  if (!inRoom) return '正在同步房间人员信息，请稍候。';
   if (players.length < REQUIRED_PLAYERS) return `还需 ${REQUIRED_PLAYERS - players.length} 人加入后才能开始。`;
   if (players.some((player) => player.connectionStatus !== 'connected')) return '需要所有成员在线后才能开始。';
   if (canStart) return '三名玩家已在线，房主可以开始游戏。';

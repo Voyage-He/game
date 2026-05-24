@@ -68,6 +68,7 @@ function bindGameControls(): void {
   bindCardClickHandlers();
 
   document.querySelector<HTMLButtonElement>('#start-game')?.addEventListener('click', () => clientState.startGame());
+  document.querySelector<HTMLButtonElement>('#leave-room')?.addEventListener('click', () => clientState.leaveRoom());
   document.querySelector<HTMLButtonElement>('#advance-vote')?.addEventListener('click', () => clientState.advanceToVote());
 
   document.querySelectorAll<HTMLButtonElement>('[data-vote]').forEach((button) => {

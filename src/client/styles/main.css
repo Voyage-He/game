@@ -165,7 +165,23 @@ input:focus-visible {
 }
 
 .start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
   margin-top: 0.75rem;
+}
+
+#leave-room {
+  background: white;
+  color: #9a1b12;
+  border: 2px solid #ffb4ab;
+}
+
+#leave-room:hover:not(:disabled),
+#leave-room:focus-visible {
+  background: #fff0ee;
+  border-color: #d92d20;
+  outline-color: #ffb4ab;
 }
 
 .owner-wait {

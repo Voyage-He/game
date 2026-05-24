@@ -110,6 +110,27 @@ export class ClientState {
     this.socket?.emit(eventName, payload);
   }
 
+  leaveRoom(): void {
+    this.socket?.emit('room:leave', {});
+    if (this.snapshot.currentRoomCode) {
+      this.cleanupToken(this.snapshot.currentRoomCode);
+    }
+    this.snapshot = {
+      publicView: null,
+      privateView: null,
+      settlement: null,
+      chatMessages: [],
+      error: null,
+      currentRoomCode: null,
+      currentSeatIndex: null,
+      connected: false,
+      serverClockOffsetMs: 0,
+      animatedCardKeys: new Set(),
+      selectionState: createInitialSelectionState()
+    };
+    this.emitChange();
+  }
+
   clearError(): void {
     this.snapshot.error = null;
     this.emitChange();
