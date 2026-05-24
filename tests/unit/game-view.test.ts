@@ -41,9 +41,13 @@ function snapshot(phase: Phase, privateOverrides: Partial<PrivateRoomView> = {},
     animatedCardKeys: new Set(),
     selectionState: {
       actionSubmitted: false,
+      wolfSelectedUnderwater: null,
       seerActionMode: 'idle',
       seerUnderwaterClicked: [],
-      troublemakerSelected: []
+      seerPlayerSelected: null,
+      robberSelectedSeat: null,
+      troublemakerSelected: [],
+      waterGhostSelectedUnderwater: null
     }
   };
 }
@@ -203,6 +207,16 @@ describe('card rendering', () => {
     expect(html).toContain('水下 3');
   });
 
+  it('renders an aria-hidden separator between underwater and player identity cards', () => {
+    const html = renderGame(snapshot('free_speech', { revealedCards: [], initialRole: '平民' }));
+    const underwaterIndex = html.indexOf('class="underwater-cards"');
+    const separatorIndex = html.indexOf('class="cards-location-separator" aria-hidden="true"');
+    const playersIndex = html.indexOf('class="players-grid"');
+
+    expect(separatorIndex).toBeGreaterThan(underwaterIndex);
+    expect(playersIndex).toBeGreaterThan(separatorIndex);
+  });
+
   it('newly revealed card contains card-flip-in CSS class', () => {
     // Fresh animatedCardKeys → first render should add card-flip-in
     const freshKeys = new Set<string>();
@@ -270,7 +284,7 @@ describe('game view Chinese prompts', () => {
       })
     );
     expect(html).toContain('轮到你行动');
-    expect(html).toContain('请点击一张水下牌查看身份');
+    expect(html).toContain('请点击一张水下牌作为目标');
   });
 
   it('shows voting progress and free-speech untimed text in Chinese', () => {
@@ -330,9 +344,13 @@ function snapWithSelection(
     ...base,
     selectionState: {
       actionSubmitted: false,
+      wolfSelectedUnderwater: null,
       seerActionMode: 'idle',
       seerUnderwaterClicked: [],
+      seerPlayerSelected: null,
+      robberSelectedSeat: null,
       troublemakerSelected: [],
+      waterGhostSelectedUnderwater: null,
       ...selectionOverrides
     }
   };
@@ -360,14 +378,15 @@ describe('US1: wolf card click rendering', () => {
     expect(htmlSubmitted).toMatch(/card-(?:player|underwater)\s+submitted/);
   });
 
-  it('T009: wolf action panel shows prompt and no buttons', () => {
+  it('T009: wolf action panel shows prompt and skip/confirm button', () => {
     const html = renderGame(
       snapWithSelection('wolf_action', {
         currentEligibleAction: { phase: 'wolf_action', options: ['view_one_underwater', 'skip'] }
       })
     );
-    expect(html).toContain('请点击一张水下牌查看身份');
-    expect(html).not.toContain('<button');
+    expect(html).toContain('请点击一张水下牌作为目标');
+    expect(html).toContain('id="confirm-skill-action"');
+    expect(html).toContain('不使用技能');
     expect(html).not.toContain('data-action=');
   });
 });
@@ -382,11 +401,10 @@ describe('US2: seer card click rendering', () => {
         seerUnderwaterClicked: [0]
       })
     );
-    // Underwater card 0 should have selected class (not clickable - already clicked)
+    // Underwater card 0 should have selected glow and remain clickable for cancellation
     expect(html).toContain('data-location="underwater:0"');
-    // Card at underwater:0 has 'selected' but not 'clickable'
-    // Panel shows progress
-    expect(html).toContain('已查看 1/2 张水下牌');
+    expect(html).toMatch(/card-underwater\s+clickable\s+selected/);
+    expect(html).toContain('已选择 1/2 张水下牌');
   });
 
   it('T013: seer second underwater click shows submitted state', () => {
@@ -400,7 +418,7 @@ describe('US2: seer card click rendering', () => {
       })
     );
     expect(html).toMatch(/card-(?:player|underwater)\s+submitted/);
-    expect(html).toContain('已查看目标身份');
+    expect(html).toContain('技能选择已提交');
   });
 
   it('T014: seer player mode — player cards are clickable', () => {
@@ -430,8 +448,8 @@ describe('US2: seer card click rendering', () => {
     );
     // No clickable player cards should exist when mode is locked to underwater
     const clickableMatches = html.match(/card-(?:player|underwater)\s+clickable/g) || [];
-    // Only unclicked underwater cards (indices 1, 2) should be clickable
-    expect(clickableMatches.length).toBe(2);
+    // All underwater cards remain clickable so selected cards can be cancelled
+    expect(clickableMatches.length).toBe(3);
   });
 
   it('T015b: seer mode lock — player mode blocks underwater cards', () => {
@@ -472,20 +490,20 @@ describe('US3: robber card click rendering', () => {
         initialRole: '强盗'
       })
     );
-    expect(html).toContain('请点击一名其他玩家的卡牌查看并交换身份');
+    expect(html).toContain('请点击一名其他玩家的卡牌作为目标');
     // Own player card (seat 0) should NOT have clickable
     // Other players' cards should be clickable
     expect(html).toMatch(/card-(?:player|underwater)\s+clickable/);
-    expect(html).not.toContain('<button');
+    expect(html).toContain('不使用技能');
   });
 });
 
 describe('US4: troublemaker and water ghost card click rendering', () => {
-  it('T022: troublemaker first click adds .selected, second submits, deselect works', () => {
+  it('T022: troublemaker selections stay pending until confirmation', () => {
     // First selection
     const html1 = renderGame(
       snapWithSelection('troublemaker_action', {
-        currentEligibleAction: { phase: 'troublemaker_action', options: ['swap_players', 'skip'] },
+        currentEligibleAction: { phase: 'troublemaker_action', options: ['exchange_two_other_players'] },
         initialRole: '捣蛋鬼'
       }, {}, {
         troublemakerSelected: [1]
@@ -494,23 +512,23 @@ describe('US4: troublemaker and water ghost card click rendering', () => {
     expect(html1).toMatch(/card-player\s+clickable\s+selected/);
     expect(html1).toContain('已选择 1/2 名玩家');
 
-    // Second selection triggers submit
+    // Second selection is still pending until the confirm button is pressed
     const html2 = renderGame(
       snapWithSelection('troublemaker_action', {
-        currentEligibleAction: { phase: 'troublemaker_action', options: ['swap_players', 'skip'] },
+        currentEligibleAction: { phase: 'troublemaker_action', options: ['exchange_two_other_players'] },
         initialRole: '捣蛋鬼'
       }, {}, {
-        troublemakerSelected: [1, 2],
-        actionSubmitted: true
+        troublemakerSelected: [1, 2]
       })
     );
-    expect(html2).toMatch(/card-(?:player|underwater)\s+submitted/);
+    expect(html2).toMatch(/card-player\s+clickable\s+selected/);
     expect(html2).toContain('已选择两名玩家');
+    expect(html2).toContain('确认使用技能');
 
     // Deselected (empty)
     const html3 = renderGame(
       snapWithSelection('troublemaker_action', {
-        currentEligibleAction: { phase: 'troublemaker_action', options: ['swap_players', 'skip'] },
+        currentEligibleAction: { phase: 'troublemaker_action', options: ['exchange_two_other_players'] },
         initialRole: '捣蛋鬼'
       }, {}, {
         troublemakerSelected: []
@@ -518,12 +536,13 @@ describe('US4: troublemaker and water ghost card click rendering', () => {
     );
     expect(html3).not.toMatch(/\sselected/);
     expect(html3).toContain('请点击两名其他玩家的卡牌进行交换');
+    expect(html3).toContain('disabled>确认使用技能');
   });
 
   it('T023: troublemaker cannot select own card', () => {
     const html = renderGame(
       snapWithSelection('troublemaker_action', {
-        currentEligibleAction: { phase: 'troublemaker_action', options: ['swap_players', 'skip'] },
+        currentEligibleAction: { phase: 'troublemaker_action', options: ['exchange_two_other_players'] },
         initialRole: '捣蛋鬼'
       })
     );
@@ -538,10 +557,10 @@ describe('US4: troublemaker and water ghost card click rendering', () => {
   it('T024: water ghost action panel shows prompt and only underwater cards have .clickable', () => {
     const html = renderGame(
       snapWithSelection('water_ghost_action', {
-        currentEligibleAction: { phase: 'water_ghost_action', options: ['swap_one_underwater', 'skip'] }
+        currentEligibleAction: { phase: 'water_ghost_action', options: ['exchange_self_with_underwater'] }
       })
     );
-    expect(html).toContain('请点击一张水下牌进行交换');
+    expect(html).toContain('请点击一张水下牌作为交换目标');
     // Underwater cards should be clickable
     expect(html).toMatch(/card-underwater\s+clickable/);
     // No player cards should be clickable
@@ -553,7 +572,7 @@ describe('US4: troublemaker and water ghost card click rendering', () => {
   it('T025: troublemaker shows progress text after first pick', () => {
     const html = renderGame(
       snapWithSelection('troublemaker_action', {
-        currentEligibleAction: { phase: 'troublemaker_action', options: ['swap_players', 'skip'] },
+        currentEligibleAction: { phase: 'troublemaker_action', options: ['exchange_two_other_players'] },
         initialRole: '捣蛋鬼'
       }, {}, {
         troublemakerSelected: [1]

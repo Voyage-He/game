@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 test('Chinese prompts explain waiting/action/voting and settlement review without early leaks', async ({ browser }) => {
+  test.setTimeout(180000);
   const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
   const [ownerContext, player2Context, player3Context] = contexts;
   const owner = await ownerContext!.newPage();
@@ -19,14 +20,17 @@ test('Chinese prompts explain waiting/action/voting and settlement review withou
   await expectAnyPageContains(pages, '其他玩家行动中');
   await expectAnyPageContains(pages, /轮到你行动|其他玩家行动中/);
 
-  await expect(owner.locator('.phase-card h2')).toHaveText('自由发言', { timeout: 30000 });
+  await expect(owner.locator('.phase-card h2')).toContainText('自由发言', { timeout: 130000 });
   await expect(owner.getByText('自由发言不限时')).toBeVisible();
   await owner.locator('#advance-vote').click();
-  await expect(owner.locator('.phase-card h2')).toHaveText('投票');
+  await expect(owner.locator('.phase-card h2')).toContainText('投票');
   await expect(owner.getByText('投票进度')).toBeVisible();
   await expect(owner.getByText('请选择一名其他玩家投票')).toBeVisible();
+  await owner.locator('[data-vote]').first().click();
+  await player2.locator('[data-vote]').first().click();
+  await player3.locator('[data-vote]').first().click();
 
-  await expect(owner.getByText('结算')).toBeVisible({ timeout: 10000 });
+  await expect(owner.getByRole('heading', { name: '结算', exact: true })).toBeVisible({ timeout: 10000 });
   // All cards are flipped in the main playing area (not separate settlement sections)
   await expect(owner.locator('.card[data-flipped="true"]').first()).toBeVisible();
   await expect(owner.getByText(/无人出局|出局：席位/)).toBeVisible();

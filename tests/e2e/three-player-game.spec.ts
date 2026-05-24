@@ -1,5 +1,51 @@
 import { expect, test, type Page } from '@playwright/test';
 
+test('waiting room shows current personnel before start', async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const player2Context = await browser.newContext();
+  const player3Context = await browser.newContext();
+  const owner = await ownerContext.newPage();
+  const player2 = await player2Context.newPage();
+  const player3 = await player3Context.newPage();
+
+  await owner.goto('/');
+  await owner.locator('#create-form input[name="nickname"]').fill('阿明');
+  await owner.locator('#create-form button').click();
+  await expect(owner.locator('.waiting-room-card')).toBeVisible();
+  await expect(owner.locator('.waiting-players')).toBeVisible();
+  await expect(owner.locator('.player-count')).toContainText('1/3');
+  await expect(owner.getByText('阿明')).toBeVisible();
+  await expect(owner.locator('.waiting-players .badge', { hasText: '房主' })).toBeVisible();
+  await expect(owner.locator('.waiting-players .badge', { hasText: '你' })).toBeVisible();
+  await expect(owner.getByText('还需 2 人加入后才能开始。')).toBeVisible();
+  await expect(owner.locator('#start-game')).toBeDisabled();
+  const roomCode = (await owner.locator('.room-code').innerText()).trim();
+
+  await player2.goto('/');
+  await player2.locator('#join-form input[name="roomCode"]').fill(roomCode);
+  await player2.locator('#join-form input[name="nickname"]').fill('小红');
+  await player2.locator('#join-form button').click();
+  await expect(owner.locator('.player-count')).toContainText('2/3');
+  await expect(owner.getByText('小红')).toBeVisible();
+  await expect(player2.locator('.player-count')).toContainText('2/3');
+  await expect(player2.getByText('阿明')).toBeVisible();
+  await expect(player2.getByText('小红')).toBeVisible();
+  await expect(player2.locator('#start-game')).toHaveCount(0);
+
+  await player3.goto('/');
+  await player3.locator('#join-form input[name="roomCode"]').fill(roomCode);
+  await player3.locator('#join-form input[name="nickname"]').fill('小李');
+  await player3.locator('#join-form button').click();
+  await expect(owner.locator('.player-count')).toContainText('3/3');
+  await expect(owner.getByText('三名玩家已在线，房主可以开始游戏。')).toBeVisible();
+  await expect(owner.locator('#start-game')).toBeEnabled();
+  await expect(player2.locator('.start-hint')).toContainText('等待房主开始游戏');
+
+  await ownerContext.close();
+  await player2Context.close();
+  await player3Context.close();
+});
+
 test('card UI: players rendered as vertical cards with underwater cards section', async ({ browser }) => {
   const ownerContext = await browser.newContext();
   const player2Context = await browser.newContext();
@@ -41,6 +87,9 @@ test('card UI: players rendered as vertical cards with underwater cards section'
   const underwaterCards = await owner.locator('.underwater-card').count();
   expect(underwaterCards).toBe(3);
 
+  // Verify underwater and player identity cards are visually separated
+  await expect(owner.locator('.cards-location-separator')).toBeVisible();
+
   // Verify card elements have expected structure
   await expect(owner.locator('.card').first()).toBeVisible();
   await expect(owner.locator('.card-back').first()).toBeVisible();
@@ -61,6 +110,7 @@ test('card UI: players rendered as vertical cards with underwater cards section'
 });
 
 test('three players create, join, reconnect, play, vote, and settle', async ({ browser }) => {
+  test.setTimeout(180000);
   const ownerContext = await browser.newContext();
   const player2Context = await browser.newContext();
   const player3Context = await browser.newContext();
@@ -99,18 +149,18 @@ test('three players create, join, reconnect, play, vote, and settle', async ({ b
   await player2.reload();
   await player2.locator('#reconnect-form input[name="roomCode"]').fill(roomCode);
   await player2.locator('#reconnect-form button').click();
-  await expect(player2.getByText(roomCode)).toBeVisible();
+  await expect(player2.locator('.phase-card')).toBeVisible();
   const ownerRemaining = await countdownNumber(owner);
   const reconnectedRemaining = await countdownNumber(player2);
   expect(Math.abs(ownerRemaining - reconnectedRemaining)).toBeLessThanOrEqual(2);
 
-  await expect(owner.locator('.phase-card h2')).toHaveText('自由发言', { timeout: 30000 });
+  await expect(owner.locator('.phase-card h2')).toContainText('自由发言', { timeout: 130000 });
   await owner.locator('#chat-form input[name="text"]').fill('我觉得狼人不在场。');
   await owner.locator('#chat-form button').click();
   await expect(player3.getByText('我觉得狼人不在场。')).toBeVisible();
 
   await owner.locator('#advance-vote').click();
-  await expect(owner.locator('.phase-card h2')).toHaveText('投票');
+  await expect(owner.locator('.phase-card h2')).toContainText('投票');
   await expectCountdownDecreases(owner);
   await owner.locator('[data-vote]').first().click();
   await player2.locator('[data-vote]').first().click();

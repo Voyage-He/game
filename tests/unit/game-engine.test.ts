@@ -14,7 +14,8 @@ import {
   performTroublemakerAction,
   performWaterGhostAction,
   performWolfAction,
-  setPhase
+  setPhase,
+  skipOptionalRoleAction
 } from '../../src/server/game/engine.js';
 import { makeWaitingThreePlayerRoom } from '../helpers/room-fixtures.js';
 
@@ -179,6 +180,16 @@ describe('role actions and hidden-information mutations', () => {
     room = setPhase(troublemaker.room, 'water_ghost_action', instantOptions);
     const waterGhost = performWaterGhostAction(room, 1, 0, instantOptions);
     expect(getCardAtUnderwater(waterGhost.room, 0).role).toBe('平民');
+  });
+
+  it('allows optional role actions to be explicitly skipped without revealing or exchanging cards', () => {
+    let room = makeRoom(['狼人', '预言家', '强盗'], ['捣蛋鬼', '水鬼', '平民']);
+    room = setPhase(room, 'wolf_action', instantOptions);
+    const skipped = skipOptionalRoleAction(room, 0, 'wolf_action', instantOptions);
+    expect(skipped.result.revealedCards).toHaveLength(0);
+    expect(skipped.result.exchangePerformed).toBe(false);
+    expect(skipped.room.actions[0]).toMatchObject({ phase: 'wolf_action', role: '狼人', isMandatory: false, isAutomatic: false, selectedTargets: [] });
+    expect(() => performWolfAction(skipped.room, 0, 0, instantOptions)).toThrow(GameError);
   });
 
   it('auto-completes mandatory actions on phase timeout', () => {

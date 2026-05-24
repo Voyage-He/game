@@ -1,5 +1,5 @@
 import { buildCountdownSnapshot, clientState, type ClientStateSnapshot, type SelectionState } from '../state.js';
-import type { PrivateRoomView, PublicRoomView, RolePhase, SettlementView } from '../../shared/types.js';
+import { ROLE_BY_PHASE, type PrivateRoomView, type PublicRoomView, type RolePhase, type SettlementView } from '../../shared/types.js';
 import { FREE_SPEECH_TEXT, ROLE_ACTION_LABELS, VOTING_WAIT_TEXT, WAITING_ACTION_TEXT, escapeHtml, formatPhase, getActionPrompt, getRevealedRole, getSelectionProgress } from './util.js';
 
 export function renderGame(snapshot: ClientStateSnapshot): string {
@@ -46,6 +46,7 @@ function renderPlayers(publicView: PublicRoomView, privateView: PrivateRoomView 
 
   return `
     ${renderUnderwaterCards(revealedCards, animatedCardKeys, selectionState, currentEligibleAction, finalUnderwaterRoles)}
+    <div class="cards-location-separator" aria-hidden="true"></div>
     <div class="players-grid">${publicView.players
       .map((player) => renderPlayerCard(player, ownSeatIndex, initialRole, revealedCards, animatedCardKeys, selectionState, currentEligibleAction, finalPlayerRoles.get(player.seatIndex)))
       .join('')}</div>`;
@@ -168,17 +169,88 @@ function renderTimer(snapshot: ClientStateSnapshot): string {
 function renderActionPanel(publicView: PublicRoomView, privateView: PrivateRoomView | null, selectionState: SelectionState): string {
   const action = privateView?.currentEligibleAction;
   if (!action || publicView.phase !== action.phase) {
+    if (isOwnRoleActionCompleted(publicView, privateView)) {
+      return '<section class="action-panel completed"><h2>身份行动已提交</h2><p>你的技能选择已提交，请等待下一阶段。</p></section>';
+    }
     if (publicView.phase?.endsWith('_action')) return `<section class="action-panel neutral"><h2>其他玩家行动中</h2><p>${WAITING_ACTION_TEXT}</p></section>`;
     return '';
   }
   const prompt = getActionPrompt(action.phase, selectionState);
   const progress = getSelectionProgress(action.phase, selectionState);
   const title = ROLE_ACTION_LABELS[action.phase as RolePhase] ?? action.phase;
+  const confirmation = getSkillConfirmationState(action.phase, selectionState, action.options);
   return `<section class="action-panel">
     <h2>${escapeHtml(title)} · 轮到你行动</h2>
     <p>${escapeHtml(prompt)}</p>
     ${progress ? `<p class="selection-progress">${escapeHtml(progress)}</p>` : ''}
+    <div class="skill-confirm-row">
+      <button id="confirm-skill-action" type="button" ${confirmation.disabled ? 'disabled' : ''}>${escapeHtml(confirmation.label)}</button>
+    </div>
+    ${confirmation.hint ? `<p class="selection-hint">${escapeHtml(confirmation.hint)}</p>` : ''}
   </section>`;
+}
+
+function isOwnRoleActionCompleted(publicView: PublicRoomView, privateView: PrivateRoomView | null): boolean {
+  if (!publicView.phase?.endsWith('_action') || !privateView?.initialRole) return false;
+  return ROLE_BY_PHASE[publicView.phase] === privateView.initialRole && Boolean(publicView.phaseCompletion?.currentRoleCompleted);
+}
+
+function getSkillConfirmationState(phase: string, sel: SelectionState, options: string[]): { label: string; disabled: boolean; hint: string | null } {
+  if (sel.actionSubmitted) return { label: '已提交', disabled: true, hint: null };
+  if (hasValidSkillSelection(phase, sel)) return { label: '确认使用技能', disabled: false, hint: null };
+  if (isOptionalSkill(options) && !hasAnySkillSelection(phase, sel)) return { label: '不使用技能', disabled: false, hint: '不选择目标时，将跳过本次技能。' };
+  return { label: '确认使用技能', disabled: true, hint: requiredSelectionHint(phase) };
+}
+
+function isOptionalSkill(options: string[]): boolean {
+  return options.includes('skip');
+}
+
+function hasAnySkillSelection(phase: string, sel: SelectionState): boolean {
+  switch (phase) {
+    case 'wolf_action':
+      return sel.wolfSelectedUnderwater !== null;
+    case 'seer_action':
+      return sel.seerUnderwaterClicked.length > 0 || sel.seerPlayerSelected !== null;
+    case 'robber_action':
+      return sel.robberSelectedSeat !== null;
+    case 'troublemaker_action':
+      return sel.troublemakerSelected.length > 0;
+    case 'water_ghost_action':
+      return sel.waterGhostSelectedUnderwater !== null;
+    default:
+      return false;
+  }
+}
+
+function hasValidSkillSelection(phase: string, sel: SelectionState): boolean {
+  switch (phase) {
+    case 'wolf_action':
+      return sel.wolfSelectedUnderwater !== null;
+    case 'seer_action':
+      return sel.seerPlayerSelected !== null || sel.seerUnderwaterClicked.length === 2;
+    case 'robber_action':
+      return sel.robberSelectedSeat !== null;
+    case 'troublemaker_action':
+      return sel.troublemakerSelected.length === 2;
+    case 'water_ghost_action':
+      return sel.waterGhostSelectedUnderwater !== null;
+    default:
+      return false;
+  }
+}
+
+function requiredSelectionHint(phase: string): string {
+  switch (phase) {
+    case 'seer_action':
+      return '请选择一名玩家，或选择两张水下牌后再确认。';
+    case 'troublemaker_action':
+      return '请选择两名其他玩家后再确认。';
+    case 'water_ghost_action':
+      return '请选择一张水下牌后再确认。';
+    default:
+      return '请选择有效目标后再确认。';
+  }
 }
 
 function isCardClickable(
@@ -195,13 +267,15 @@ function isCardClickable(
       return cardKind === 'underwater';
     case 'seer_action':
       if (cardKind === 'underwater') {
-        return sel.seerActionMode !== 'player' && !sel.seerUnderwaterClicked.includes(targetIndex) && sel.seerUnderwaterClicked.length < 2;
+        if (sel.seerActionMode === 'player') return false;
+        return sel.seerUnderwaterClicked.includes(targetIndex) || sel.seerUnderwaterClicked.length < 2;
       }
       return sel.seerActionMode !== 'underwater' && targetIndex !== ownSeatIndex;
     case 'robber_action':
       return cardKind === 'player' && targetIndex !== ownSeatIndex;
     case 'troublemaker_action':
-      return cardKind === 'player' && targetIndex !== ownSeatIndex;
+      if (cardKind !== 'player' || targetIndex === ownSeatIndex) return false;
+      return sel.troublemakerSelected.includes(targetIndex) || sel.troublemakerSelected.length < 2;
     case 'water_ghost_action':
       return cardKind === 'underwater';
     default:
@@ -210,12 +284,26 @@ function isCardClickable(
 }
 
 function isCardSelected(
+  phase: string | undefined,
   cardKind: 'player' | 'underwater',
   targetIndex: number,
   sel: SelectionState
 ): boolean {
-  if (cardKind === 'player') return sel.troublemakerSelected.includes(targetIndex);
-  return sel.seerUnderwaterClicked.includes(targetIndex);
+  switch (phase) {
+    case 'wolf_action':
+      return cardKind === 'underwater' && sel.wolfSelectedUnderwater === targetIndex;
+    case 'seer_action':
+      if (cardKind === 'underwater') return sel.seerUnderwaterClicked.includes(targetIndex);
+      return sel.seerPlayerSelected === targetIndex;
+    case 'robber_action':
+      return cardKind === 'player' && sel.robberSelectedSeat === targetIndex;
+    case 'troublemaker_action':
+      return cardKind === 'player' && sel.troublemakerSelected.includes(targetIndex);
+    case 'water_ghost_action':
+      return cardKind === 'underwater' && sel.waterGhostSelectedUnderwater === targetIndex;
+    default:
+      return false;
+  }
 }
 
 function getCardInteractionClass(
@@ -231,7 +319,7 @@ function getCardInteractionClass(
   if (isCardClickable(phase, cardKind, targetIndex, ownSeatIndex, sel, currentEligibleAction)) {
     classes.push('clickable');
   }
-  if (isCardSelected(cardKind, targetIndex, sel)) {
+  if (isCardSelected(phase, cardKind, targetIndex, sel)) {
     classes.push('selected');
   }
   return classes.join(' ');
@@ -263,6 +351,7 @@ function renderSettlement(snapshot: ClientStateSnapshot): string {
 export function bindCardClickHandlers(): void {
   const underwaterGrid = document.querySelector('.underwater-cards-grid');
   const playersGrid = document.querySelector('.players-grid');
+  const confirmButton = document.querySelector<HTMLButtonElement>('#confirm-skill-action');
 
   function handleClick(event: Event): void {
     const snap = clientState.getSnapshot();
@@ -275,18 +364,16 @@ export function bindCardClickHandlers(): void {
     const target = event.target as HTMLElement;
     const ownSeatIndex = snap.privateView?.seatIndex;
 
-    // Check underwater card click
     const underwaterCard = target.closest('.underwater-card');
     if (underwaterCard) {
       const idxStr = underwaterCard.getAttribute('data-underwater-index');
       if (idxStr === null) return;
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx)) return;
-      handleUnderwaterClick(action.phase, idx, ownSeatIndex, sel);
+      handleUnderwaterClick(action.phase, idx, sel);
       return;
     }
 
-    // Check player card click
     const playerCard = target.closest('.player-card');
     if (playerCard) {
       const idxStr = playerCard.getAttribute('data-seat-index');
@@ -299,87 +386,114 @@ export function bindCardClickHandlers(): void {
 
   underwaterGrid?.addEventListener('click', handleClick);
   playersGrid?.addEventListener('click', handleClick);
+  confirmButton?.addEventListener('click', handleSkillConfirmClick);
 }
 
-function handleUnderwaterClick(phase: string, idx: number, ownSeatIndex: number | undefined, sel: SelectionState): void {
+function handleUnderwaterClick(phase: string, idx: number, sel: SelectionState): void {
   switch (phase) {
     case 'wolf_action':
-      clientState.sendRoleAction('action:wolf', { underwaterIndex: idx });
-      clientState.updateCardSelection({ actionSubmitted: true });
+      clientState.updateCardSelection({
+        wolfSelectedUnderwater: sel.wolfSelectedUnderwater === idx ? null : idx
+      });
       break;
-    case 'seer_action':
-      if (sel.seerActionMode === 'player') return; // locked to player mode
-      if (sel.seerUnderwaterClicked.includes(idx)) return; // already clicked
-      if (sel.seerUnderwaterClicked.length >= 2) return; // max 2
-
-      if (sel.seerUnderwaterClicked.length === 0) {
-        // First underwater click — record locally, no server event yet
+    case 'seer_action': {
+      if (sel.seerActionMode === 'player') return;
+      if (sel.seerUnderwaterClicked.includes(idx)) {
+        const next = sel.seerUnderwaterClicked.filter((selected) => selected !== idx);
         clientState.updateCardSelection({
-          seerActionMode: 'underwater',
-          seerUnderwaterClicked: [idx]
+          seerActionMode: next.length === 0 ? 'idle' : 'underwater',
+          seerUnderwaterClicked: next
         });
-      } else {
-        // Second distinct underwater click — submit both
-        const both = [sel.seerUnderwaterClicked[0], idx];
-        clientState.sendRoleAction('action:seer', {
-          mode: 'view_two_underwater',
-          underwaterIndexes: both
-        });
-        clientState.updateCardSelection({
-          seerActionMode: 'underwater',
-          seerUnderwaterClicked: both,
-          actionSubmitted: true
-        });
+        return;
       }
+      if (sel.seerUnderwaterClicked.length >= 2) return;
+      clientState.updateCardSelection({
+        seerActionMode: 'underwater',
+        seerUnderwaterClicked: [...sel.seerUnderwaterClicked, idx]
+      });
       break;
+    }
     case 'water_ghost_action':
-      clientState.sendRoleAction('action:water-ghost', { underwaterIndex: idx });
-      clientState.updateCardSelection({ actionSubmitted: true });
+      clientState.updateCardSelection({
+        waterGhostSelectedUnderwater: sel.waterGhostSelectedUnderwater === idx ? null : idx
+      });
       break;
   }
 }
 
 function handlePlayerClick(phase: string, seatIdx: number, ownSeatIndex: number | undefined, sel: SelectionState): void {
-  if (seatIdx === ownSeatIndex) return; // Can't target self
+  if (seatIdx === ownSeatIndex) return;
 
   switch (phase) {
     case 'seer_action':
-      if (sel.seerActionMode === 'underwater') return; // locked to underwater mode
-      if (sel.seerActionMode !== 'idle') return; // already acted
-      clientState.sendRoleAction('action:seer', {
-        mode: 'view_one_player',
-        targetSeatIndex: seatIdx
-      });
+      if (sel.seerActionMode === 'underwater') return;
+      if (sel.seerPlayerSelected === seatIdx) {
+        clientState.updateCardSelection({ seerActionMode: 'idle', seerPlayerSelected: null });
+        return;
+      }
       clientState.updateCardSelection({
         seerActionMode: 'player',
-        actionSubmitted: true
+        seerPlayerSelected: seatIdx
       });
       break;
     case 'robber_action':
-      clientState.sendRoleAction('action:robber', { targetSeatIndex: seatIdx });
-      clientState.updateCardSelection({ actionSubmitted: true });
+      clientState.updateCardSelection({
+        robberSelectedSeat: sel.robberSelectedSeat === seatIdx ? null : seatIdx
+      });
       break;
     case 'troublemaker_action':
       if (sel.troublemakerSelected.includes(seatIdx)) {
-        // Deselect
         clientState.updateCardSelection({
-          troublemakerSelected: sel.troublemakerSelected.filter(s => s !== seatIdx)
+          troublemakerSelected: sel.troublemakerSelected.filter((selected) => selected !== seatIdx)
         });
-      } else if (sel.troublemakerSelected.length === 0) {
-        // First selection
+      } else if (sel.troublemakerSelected.length < 2) {
         clientState.updateCardSelection({
-          troublemakerSelected: [seatIdx]
-        });
-      } else if (sel.troublemakerSelected.length === 1) {
-        // Second selection — submit
-        clientState.sendRoleAction('action:troublemaker', {
-          targetSeatIndexes: [sel.troublemakerSelected[0], seatIdx]
-        });
-        clientState.updateCardSelection({
-          troublemakerSelected: [...sel.troublemakerSelected, seatIdx],
-          actionSubmitted: true
+          troublemakerSelected: [...sel.troublemakerSelected, seatIdx]
         });
       }
       break;
+  }
+}
+
+function handleSkillConfirmClick(): void {
+  const snap = clientState.getSnapshot();
+  const action = snap.privateView?.currentEligibleAction;
+  if (!action) return;
+  const sel = snap.selectionState;
+  if (sel.actionSubmitted) return;
+
+  if (isOptionalSkill(action.options) && !hasAnySkillSelection(action.phase, sel)) {
+    clientState.sendRoleAction('action:skip', { phase: action.phase });
+    clientState.updateCardSelection({ actionSubmitted: true });
+    return;
+  }
+
+  if (!hasValidSkillSelection(action.phase, sel)) return;
+  const payload = buildSkillActionPayload(action.phase, sel);
+  if (!payload) return;
+  clientState.sendRoleAction(payload.eventName, payload.body);
+  clientState.updateCardSelection({ actionSubmitted: true });
+}
+
+function buildSkillActionPayload(phase: string, sel: SelectionState): { eventName: string; body: unknown } | null {
+  switch (phase) {
+    case 'wolf_action':
+      return sel.wolfSelectedUnderwater === null ? null : { eventName: 'action:wolf', body: { underwaterIndex: sel.wolfSelectedUnderwater } };
+    case 'seer_action':
+      if (sel.seerPlayerSelected !== null) {
+        return { eventName: 'action:seer', body: { mode: 'view_one_player', targetSeatIndex: sel.seerPlayerSelected } };
+      }
+      if (sel.seerUnderwaterClicked.length === 2) {
+        return { eventName: 'action:seer', body: { mode: 'view_two_underwater', underwaterIndexes: sel.seerUnderwaterClicked } };
+      }
+      return null;
+    case 'robber_action':
+      return sel.robberSelectedSeat === null ? null : { eventName: 'action:robber', body: { targetSeatIndex: sel.robberSelectedSeat } };
+    case 'troublemaker_action':
+      return sel.troublemakerSelected.length === 2 ? { eventName: 'action:troublemaker', body: { targetSeatIndexes: sel.troublemakerSelected } } : null;
+    case 'water_ghost_action':
+      return sel.waterGhostSelectedUnderwater === null ? null : { eventName: 'action:water-ghost', body: { underwaterIndex: sel.waterGhostSelectedUnderwater } };
+    default:
+      return null;
   }
 }

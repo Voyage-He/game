@@ -4,9 +4,26 @@ import type { ErrorCode } from '../shared/errors.js';
 
 export interface SelectionState {
   actionSubmitted: boolean;
+  wolfSelectedUnderwater: number | null;
   seerActionMode: 'idle' | 'underwater' | 'player';
   seerUnderwaterClicked: number[];
+  seerPlayerSelected: number | null;
+  robberSelectedSeat: number | null;
   troublemakerSelected: number[];
+  waterGhostSelectedUnderwater: number | null;
+}
+
+export function createInitialSelectionState(): SelectionState {
+  return {
+    actionSubmitted: false,
+    wolfSelectedUnderwater: null,
+    seerActionMode: 'idle',
+    seerUnderwaterClicked: [],
+    seerPlayerSelected: null,
+    robberSelectedSeat: null,
+    troublemakerSelected: [],
+    waterGhostSelectedUnderwater: null
+  };
 }
 
 export interface ClientStateSnapshot {
@@ -37,12 +54,7 @@ export class ClientState {
     connected: false,
     serverClockOffsetMs: 0,
     animatedCardKeys: new Set(),
-    selectionState: {
-      actionSubmitted: false,
-      seerActionMode: 'idle',
-      seerUnderwaterClicked: [],
-      troublemakerSelected: []
-    }
+    selectionState: createInitialSelectionState()
   };
 
   subscribe(listener: () => void): () => void {
@@ -167,12 +179,7 @@ export class ClientState {
       }
       // Clear selection state when phase changes or action no longer eligible
       if (view.revealedCards.length === 0 || view.currentEligibleAction === null) {
-        this.snapshot.selectionState = {
-          actionSubmitted: false,
-          seerActionMode: 'idle',
-          seerUnderwaterClicked: [],
-          troublemakerSelected: []
-        };
+        this.snapshot.selectionState = createInitialSelectionState();
       }
       this.snapshot.privateView = view;
       this.snapshot.currentSeatIndex = view.seatIndex;
@@ -196,6 +203,8 @@ export class ClientState {
 
     this.socket.on('error', (error: { code: ErrorCode; message: string }) => {
       this.snapshot.error = error.message;
+      // Reset submitted state so the player can retry after an action error
+      this.snapshot.selectionState.actionSubmitted = false;
       this.emitChange();
     });
   }

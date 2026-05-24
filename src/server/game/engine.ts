@@ -327,6 +327,25 @@ export function performWaterGhostAction(inputRoom: Room, seatIndex: SeatIndex, u
   return { room: touch(room, options.now), result: actionResult('water_ghost_action', [], true) };
 }
 
+export function skipOptionalRoleAction(inputRoom: Room, seatIndex: SeatIndex, phase: 'wolf_action' | 'seer_action' | 'robber_action', options: EngineOptions = {}): { room: Room; result: ActionResult } {
+  const role = ROLE_BY_PHASE[phase];
+  if (!role) throw new GameError('INVALID_PHASE');
+  const room = prepareRoleAction(inputRoom, seatIndex, phase, role, options);
+  const actor = getSeatByIndex(room, seatIndex);
+  recordAction(room, {
+    phase,
+    role: role as Exclude<Role, '平民'>,
+    actingSeatId: actor.seatId,
+    isMandatory: false,
+    isAutomatic: false,
+    selectedTargets: [],
+    revealedCardIds: [],
+    exchangedCardIds: []
+  }, options.now);
+  markActionComplete(room, actor.seatId);
+  return { room: touch(room, options.now), result: actionResult(phase, [], false) };
+}
+
 export function castVote(inputRoom: Room, voterSeatIndex: SeatIndex, targetSeatIndex: SeatIndex, options: EngineOptions = {}, isAutomatic = false): Room {
   let room = cloneRoom(inputRoom);
   if (room.phase !== 'voting') throw new GameError('INVALID_PHASE');

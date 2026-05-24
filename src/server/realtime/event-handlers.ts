@@ -4,6 +4,7 @@ import {
   EmptyPayloadSchema,
   RobberActionSchema,
   SeerActionSchema,
+  SkipRoleActionSchema,
   TroublemakerActionSchema,
   VoteCastSchema,
   WaterGhostActionSchema,
@@ -18,7 +19,8 @@ import {
   performSeerAction,
   performTroublemakerAction,
   performWaterGhostAction,
-  performWolfAction
+  performWolfAction,
+  skipOptionalRoleAction
 } from '../game/engine.js';
 import type { RoomTimerService } from '../game/timers.js';
 import type { RoomStore } from '../room-store.js';
@@ -95,6 +97,16 @@ export function registerRoomEventHandlers(socket: Socket, context: RealtimeHandl
       const body = WaterGhostActionSchema.parse(payload);
       const { room, seatIndex } = getSocketRoomSeat(socket, context.store);
       const next = performWaterGhostAction(room, seatIndex, body.underwaterIndex, context.timers.engineOptions());
+      socket.emit('action:result', next.result);
+      context.timers.replaceAndSchedule(next.room);
+    });
+  });
+
+  socket.on('action:skip', (payload) => {
+    handleSocketEvent(socket, () => {
+      const body = SkipRoleActionSchema.parse(payload);
+      const { room, seatIndex } = getSocketRoomSeat(socket, context.store);
+      const next = skipOptionalRoleAction(room, seatIndex, body.phase, context.timers.engineOptions());
       socket.emit('action:result', next.result);
       context.timers.replaceAndSchedule(next.room);
     });

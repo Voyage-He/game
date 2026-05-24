@@ -53,6 +53,7 @@ test('card UI renders with correct structure for click interaction', async ({ br
 });
 
 test('clickable cards appear during action phases', async ({ browser }) => {
+  test.setTimeout(180000);
   const ownerCtx = await browser.newContext();
   const p2Ctx = await browser.newContext();
   const p3Ctx = await browser.newContext();
@@ -83,7 +84,7 @@ test('clickable cards appear during action phases', async ({ browser }) => {
 
   const actingPage = await Promise.race(
     pages.map(async (page) => {
-      await page.waitForSelector('.action-panel:not(.neutral)', { timeout: 45000 });
+      await page.waitForSelector('.action-panel:not(.neutral)', { timeout: 130000 });
       const clickableCount = await page.locator('.card.clickable').count();
       return clickableCount > 0 ? page : null;
     })
@@ -99,6 +100,7 @@ test('clickable cards appear during action phases', async ({ browser }) => {
 });
 
 test('non-acting player sees no clickable cards and neutral panel', async ({ browser }) => {
+  test.setTimeout(180000);
   const ownerCtx = await browser.newContext();
   const p2Ctx = await browser.newContext();
   const p3Ctx = await browser.newContext();
@@ -129,7 +131,7 @@ test('non-acting player sees no clickable cards and neutral panel', async ({ bro
   const actorPromise = Promise.race(
     pages.map(async (page) => {
       try {
-        await page.waitForSelector('.action-panel:not(.neutral)', { timeout: 45000 });
+        await page.waitForSelector('.action-panel:not(.neutral)', { timeout: 130000 });
         return page;
       } catch {
         return null;

@@ -51,25 +51,30 @@ export function getRevealedRole(location: string, revealedCards: Array<{ locatio
 export function getActionPrompt(phase: string, selectionState: SelectionState): string {
   switch (phase) {
     case 'wolf_action':
-      return '请点击一张水下牌查看身份';
+      if (selectionState.actionSubmitted) return '技能选择已提交，请等待下一阶段';
+      return '请点击一张水下牌作为目标，确认前不会翻牌';
     case 'seer_action': {
-      if (selectionState.actionSubmitted) return '已查看目标身份，请等待下一阶段';
+      if (selectionState.actionSubmitted) return '技能选择已提交，请等待下一阶段';
       if (selectionState.seerActionMode === 'underwater') {
         const count = selectionState.seerUnderwaterClicked.length;
-        return `已查看 ${count}/2 张水下牌，可再点击一张水下牌查看`;
+        return count < 2 ? '已选择水下牌路径，请再选择一张水下牌后确认' : '已选择两张水下牌，请确认使用技能';
       }
-      return '请点击一张水下牌查看身份（最多两张），或点击一名玩家的卡牌查看其身份';
+      if (selectionState.seerActionMode === 'player') return '已选择一名玩家，请确认使用技能';
+      return '请选择两张水下牌，或选择一名玩家的卡牌；确认前不会翻牌';
     }
     case 'robber_action':
-      return '请点击一名其他玩家的卡牌查看并交换身份';
+      if (selectionState.actionSubmitted) return '技能选择已提交，请等待下一阶段';
+      return '请点击一名其他玩家的卡牌作为目标，确认后才查看并交换身份';
     case 'troublemaker_action': {
-      if (selectionState.actionSubmitted) return '已选择两名玩家，正在提交交换...';
+      if (selectionState.actionSubmitted) return '技能选择已提交，请等待下一阶段';
       const count = selectionState.troublemakerSelected.length;
       if (count === 1) return '已选择 1/2 名玩家，请选择第二名玩家（可再次点击已选中卡牌取消）';
-      return '请点击两名其他玩家的卡牌进行交换';
+      if (count === 2) return '已选择两名玩家，请确认交换';
+      return '请点击两名其他玩家的卡牌进行交换，确认前不会提交';
     }
     case 'water_ghost_action':
-      return '请点击一张水下牌进行交换';
+      if (selectionState.actionSubmitted) return '技能选择已提交，请等待下一阶段';
+      return '请点击一张水下牌作为交换目标，确认前不会提交';
     default:
       return '';
   }
@@ -78,16 +83,25 @@ export function getActionPrompt(phase: string, selectionState: SelectionState): 
 export function getSelectionProgress(phase: string, selectionState: SelectionState): string | null {
   if (selectionState.actionSubmitted) return null;
   switch (phase) {
+    case 'wolf_action':
+      return selectionState.wolfSelectedUnderwater === null ? null : `已选择水下 ${selectionState.wolfSelectedUnderwater + 1}`;
     case 'seer_action':
       if (selectionState.seerActionMode === 'underwater') {
-        return `已查看 ${selectionState.seerUnderwaterClicked.length}/2 张水下牌`;
+        return `已选择 ${selectionState.seerUnderwaterClicked.length}/2 张水下牌`;
+      }
+      if (selectionState.seerActionMode === 'player' && selectionState.seerPlayerSelected !== null) {
+        return `已选择席位 ${selectionState.seerPlayerSelected + 1}`;
       }
       return null;
+    case 'robber_action':
+      return selectionState.robberSelectedSeat === null ? null : `已选择席位 ${selectionState.robberSelectedSeat + 1}`;
     case 'troublemaker_action':
       if (selectionState.troublemakerSelected.length > 0) {
         return `已选择 ${selectionState.troublemakerSelected.length}/2 名玩家`;
       }
       return null;
+    case 'water_ghost_action':
+      return selectionState.waterGhostSelectedUnderwater === null ? null : `已选择水下 ${selectionState.waterGhostSelectedUnderwater + 1}`;
     default:
       return null;
   }

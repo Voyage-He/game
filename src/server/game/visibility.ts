@@ -61,7 +61,7 @@ export function projectPublicRoomView(room: Room): PublicRoomView {
 export function projectPrivateRoomView(room: Room, seatId: string): PrivateRoomView {
   const seat = getSeatById(room, seatId);
   const initialRole = getInitialRoleForSeat(room, seat);
-  const eligiblePhase = room.phase && ROLE_BY_PHASE[room.phase] === initialRole ? (room.phase as RolePhase) : null;
+  const eligiblePhase = room.phase && ROLE_BY_PHASE[room.phase] === initialRole && !hasSeatCompletedPhase(room, seatId, room.phase as RolePhase) ? (room.phase as RolePhase) : null;
   const submittedVote = room.votes[seatId]
     ? {
         targetSeatIndex: getSeatById(room, room.votes[seatId].targetSeatId).seatIndex,
@@ -150,6 +150,10 @@ function isCurrentRoleCompleted(room: Room, phase: Phase): boolean {
   const role = ROLE_BY_PHASE[phase];
   if (!role) return phase !== 'free_speech';
   return room.actions.some((action) => action.phase === phase);
+}
+
+function hasSeatCompletedPhase(room: Room, seatId: string, phase: RolePhase): boolean {
+  return room.actions.some((action) => action.phase === phase && action.actingSeatId === seatId);
 }
 
 export function privateCurrentRole(room: Room, seatId: string): Role | null {

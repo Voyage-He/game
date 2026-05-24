@@ -69,6 +69,12 @@ export const WaterGhostActionSchema = z.object({
   underwaterIndex: UnderwaterIndexSchema
 });
 
+export const OptionalRolePhaseSchema = z.enum(['wolf_action', 'seer_action', 'robber_action']);
+
+export const SkipRoleActionSchema = z.object({
+  phase: OptionalRolePhaseSchema
+});
+
 export const VoteCastSchema = z.object({
   targetSeatIndex: SeatIndexSchema
 });
@@ -148,6 +154,7 @@ export type SeerActionPayload = z.infer<typeof SeerActionSchema>;
 export type RobberActionPayload = z.infer<typeof RobberActionSchema>;
 export type TroublemakerActionPayload = z.infer<typeof TroublemakerActionSchema>;
 export type WaterGhostActionPayload = z.infer<typeof WaterGhostActionSchema>;
+export type SkipRoleActionPayload = z.infer<typeof SkipRoleActionSchema>;
 export type VoteCastPayload = z.infer<typeof VoteCastSchema>;
 export type ChatSendPayload = z.infer<typeof ChatSendSchema>;
 export type PublicRoomViewPayload = z.infer<typeof PublicRoomViewSchema>;

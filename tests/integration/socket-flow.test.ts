@@ -126,6 +126,26 @@ describe('Socket.IO room flow contracts', () => {
     expect((await waterResult).exchangePerformed).toBe(true);
   });
 
+  it('supports explicit skip for optional role actions without reveals', async () => {
+    const seats = await createThreeSeats(context);
+    const sockets = await connectSeats(context, seats);
+    forceRoles(context, seats.roomCode, ['狼人', '预言家', '强盗'], ['捣蛋鬼', '水鬼', '平民']);
+
+    const wolfRoom = setPhase(context.store.requireRoom(seats.roomCode), 'wolf_action', context.handle.timers.engineOptions());
+    context.store.replaceRoom(wolfRoom);
+    emitRoomState(context.handle.namespace, context.store, seats.roomCode);
+
+    const resultEvent = waitForEvent(sockets[0]!, 'action:result');
+    const privateEvent = waitForEvent<PrivateRoomView>(sockets[0]!, 'state:private', (view) => view.currentEligibleAction === null);
+    sockets[0]!.emit('action:skip', { phase: 'wolf_action' });
+
+    const [result, privateView] = await Promise.all([resultEvent, privateEvent]);
+    expect(result.revealedCards).toHaveLength(0);
+    expect(result.exchangePerformed).toBe(false);
+    expect(privateView.revealedCards.filter((card) => card.location.startsWith('underwater:'))).toHaveLength(0);
+    expect(context.store.requireRoom(seats.roomCode).actions[0]).toMatchObject({ phase: 'wolf_action', selectedTargets: [] });
+  });
+
   it('validates at least 95% of visible room state updates within 2 seconds', async () => {
     const seats = await createThreeSeats(context);
     const sockets = await connectSeats(context, seats);
@@ -191,12 +211,13 @@ describe('Socket.IO room flow contracts', () => {
     expect(otherUnderwaterReveals).toHaveLength(0);
 
     // Advance phase to robber_action
+    const afterPhaseChangeEvent = waitForEvent<PrivateRoomView>(sockets[0]!, 'state:private');
     const robberRoom = setPhase(context.store.requireRoom(seats.roomCode), 'robber_action', context.handle.timers.engineOptions());
     context.store.replaceRoom(robberRoom);
     emitRoomState(context.handle.namespace, context.store, seats.roomCode);
 
     // Capture state:private for seer — revealedCards should no longer have underwater reveals
-    const afterPhaseChange = await waitForEvent<PrivateRoomView>(sockets[0]!, 'state:private');
+    const afterPhaseChange = await afterPhaseChangeEvent;
     const afterChangeReveals = afterPhaseChange.revealedCards.filter((card) => card.location.startsWith('underwater:'));
     expect(afterChangeReveals).toHaveLength(0);
   });
@@ -230,11 +251,12 @@ describe('Socket.IO room flow contracts', () => {
     expect(otherReveals).toHaveLength(0);
 
     // Advance phase → reveals cleared
+    const afterPhaseChangeEvent = waitForEvent<PrivateRoomView>(sockets[0]!, 'state:private');
     const seerRoom = setPhase(context.store.requireRoom(seats.roomCode), 'seer_action', context.handle.timers.engineOptions());
     context.store.replaceRoom(seerRoom);
     emitRoomState(context.handle.namespace, context.store, seats.roomCode);
 
-    const afterPhaseChange = await waitForEvent<PrivateRoomView>(sockets[0]!, 'state:private');
+    const afterPhaseChange = await afterPhaseChangeEvent;
     const afterReveals = afterPhaseChange.revealedCards.filter((card) => card.location.startsWith('underwater:'));
     expect(afterReveals).toHaveLength(0);
   });
