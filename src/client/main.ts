@@ -38,9 +38,10 @@ function render(): void {
     ${!snapshot.publicView || snapshot.publicView.status === 'waiting' ? renderLobby(snapshot) : renderGame(snapshot)}
     ${inRoom ? renderChat(snapshot.chatMessages, snapshot.publicView?.phase === 'free_speech') : ''}
   `;
-  bindForms();
+  bindLobbyEvents();
   bindGameControls();
   bindAuthControls();
+  maybeFetchLobbyRooms();
   syncCountdownRenderLoop(snapshot);
 
   // Restore in-progress chat input text
@@ -105,6 +106,7 @@ function showAuthError(error: unknown): void {
 
 function bindAuthControls(): void {
   document.querySelector<HTMLButtonElement>('#auth-logout-btn')?.addEventListener('click', () => {
+    resetLobbyFetchState();
     clientState.authLogout();
   });
 
@@ -182,27 +184,28 @@ function syncInviteCodeEvents(): void {
   });
 }
 
-/* ── Existing game form bindings ── */
+/* ── Lobby + Chat form bindings ── */
 
-function bindForms(): void {
-  document.querySelector<HTMLFormElement>('#create-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    await runAction(() => clientState.createRoom(String(data.get('nickname') ?? '')));
+function bindLobbyEvents(): void {
+  // Create room button
+  document.querySelector<HTMLButtonElement>('#lobby-create-room')?.addEventListener('click', async () => {
+    await runAction(() => clientState.createRoom());
   });
 
-  document.querySelector<HTMLFormElement>('#join-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    await runAction(() => clientState.joinRoom(String(data.get('roomCode') ?? ''), String(data.get('nickname') ?? '')));
+  // Refresh room list
+  document.querySelector<HTMLButtonElement>('#lobby-refresh')?.addEventListener('click', async () => {
+    await runAction(() => clientState.fetchLobbyRooms());
   });
 
-  document.querySelector<HTMLFormElement>('#reconnect-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    await runAction(() => clientState.reconnect(String(data.get('roomCode') ?? '')));
+  // Room list item click to join
+  document.querySelectorAll<HTMLElement>('.room-card-item').forEach((item) => {
+    item.addEventListener('click', async () => {
+      const roomCode = item.dataset.roomCode;
+      if (roomCode) await runAction(() => clientState.joinRoom(roomCode));
+    });
   });
 
+  // Chat form
   document.querySelector<HTMLFormElement>('#chat-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -212,11 +215,39 @@ function bindForms(): void {
   });
 }
 
+// Fetch lobby rooms when entering lobby view (triggered by re-render after login)
+let lastLobbyFetch = 0;
+let initialLobbyFetchDone = false;
+async function maybeFetchLobbyRooms(): Promise<void> {
+  const snapshot = clientState.getSnapshot();
+  if (!snapshot.publicView && snapshot.authUser && !snapshot.showAuthPage) {
+    const now = Date.now();
+    if (now - lastLobbyFetch > 5000) {
+      lastLobbyFetch = now;
+      // Delay first fetch slightly to let the initial render settle (prevents UI flash)
+      if (!initialLobbyFetchDone) {
+        initialLobbyFetchDone = true;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      await clientState.fetchLobbyRooms().catch(() => {});
+    }
+  }
+}
+
+// Reset flag on logout so lobby refreshes next login
+function resetLobbyFetchState(): void {
+  lastLobbyFetch = 0;
+  initialLobbyFetchDone = false;
+}
+
 function bindGameControls(): void {
   bindCardClickHandlers();
 
   document.querySelector<HTMLButtonElement>('#start-game')?.addEventListener('click', () => clientState.startGame());
-  document.querySelector<HTMLButtonElement>('#leave-room')?.addEventListener('click', () => clientState.leaveRoom());
+  document.querySelector<HTMLButtonElement>('#leave-room')?.addEventListener('click', () => {
+    resetLobbyFetchState();
+    clientState.leaveRoom();
+  });
   document.querySelector<HTMLButtonElement>('#advance-vote')?.addEventListener('click', () => clientState.advanceToVote());
 
   document.querySelectorAll<HTMLButtonElement>('[data-vote]').forEach((button) => {

@@ -1,7 +1,7 @@
 import { escapeHtml } from './util.js';
 
 interface AuthState {
-  authUser: { username: string } | null;
+  authUser: { username: string; isAdmin: boolean } | null;
   authToken: string | null;
 }
 
@@ -54,11 +54,14 @@ export function renderAuthPage(error?: string): string {
 
 export function renderUserStatusBar(authState: AuthState): string {
   if (!authState.authUser) return '';
+  const inviteCodeBtn = authState.authUser.isAdmin
+    ? '<button id="auth-show-invite-codes" class="btn-small">邀请码管理</button>'
+    : '';
   return `
     <div class="user-status-bar">
-      <span class="user-status-info">已登录：<strong>${escapeHtml(authState.authUser.username)}</strong></span>
+      <span class="user-status-info">已登录：<strong>${escapeHtml(authState.authUser.username)}</strong>${authState.authUser.isAdmin ? ' <span class="badge admin-badge">管理员</span>' : ''}</span>
       <span class="user-status-actions">
-        <button id="auth-show-invite-codes" class="btn-small">邀请码管理</button>
+        ${inviteCodeBtn}
         <button id="auth-logout-btn" class="btn-small btn-outline">登出</button>
       </span>
     </div>

@@ -20,17 +20,18 @@ export const RoomCodeSchema = z
 
 export const ReconnectTokenSchema = z.string().min(16).max(256);
 
+// nickname is preferred from auth token, with body fallback for backward compat
+const NicknameOptional = NicknameSchema.optional();
 export const CreateRoomRequestSchema = z.object({
-  nickname: NicknameSchema
-});
+  nickname: NicknameOptional
+}).passthrough();
 
 export const JoinRoomRequestSchema = z.object({
-  nickname: NicknameSchema
-});
+  nickname: NicknameOptional
+}).passthrough();
 
-export const ReconnectRoomRequestSchema = z.object({
-  reconnectToken: ReconnectTokenSchema
-});
+// Reconnect API removed — socket-level auth handles reconnection via token
+// export const ReconnectRoomRequestSchema = z.object({ reconnectToken: ReconnectTokenSchema });
 
 export const SocketAuthSchema = z.object({
   roomCode: RoomCodeSchema,
@@ -103,6 +104,16 @@ export const PlayerPublicViewSchema = z.object({
   connectionStatus: z.enum(['connected', 'disconnected'])
 });
 
+// Lobby room entry (used by GET /api/rooms/lobby)
+export const LobbyRoomEntrySchema = z.object({
+  roomCode: RoomCodeSchema,
+  playerCount: z.number().int().min(0).max(3),
+  maxPlayers: z.literal(3),
+  players: z.array(PlayerPublicViewSchema),
+  hasPassword: z.boolean(),
+  createdAt: IsoTimestampSchema
+});
+
 export const PublicRoomViewSchema = z.object({
   roomCode: RoomCodeSchema,
   status: RoomStatusSchema,
@@ -147,7 +158,7 @@ export const PhaseChangedSchema = z.object({
 
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequestSchema>;
 export type JoinRoomRequest = z.infer<typeof JoinRoomRequestSchema>;
-export type ReconnectRoomRequest = z.infer<typeof ReconnectRoomRequestSchema>;
+export type LobbyRoomEntry = z.infer<typeof LobbyRoomEntrySchema>;
 export type SocketAuth = z.infer<typeof SocketAuthSchema>;
 export type WolfActionPayload = z.infer<typeof WolfActionSchema>;
 export type SeerActionPayload = z.infer<typeof SeerActionSchema>;

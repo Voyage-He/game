@@ -9,6 +9,7 @@ const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 export interface UserRecord {
   username: string;
   passwordHash: string;
+  isAdmin: boolean;
   createdAt: string;
   lastLoginAt: string;
 }
@@ -84,9 +85,14 @@ export class AuthStore {
     }
     const passwordHash = await this.hashPassword(password);
     const now = new Date().toISOString();
+    const hasExistingAdmin = [...this.users.values()].some((u) => u.isAdmin);
+    const isFirstUser = this.users.size === 0;
+    const adminList = (process.env.ADMIN_USERNAMES ?? '').split(',').map((s) => normalizeUsername(s)).filter(Boolean);
+    const isAdmin = isFirstUser || !hasExistingAdmin || adminList.includes(normalized);
     this.users.set(normalized, {
       username: normalized,
       passwordHash,
+      isAdmin,
       createdAt: now,
       lastLoginAt: now
     });
@@ -178,8 +184,17 @@ export class AuthStore {
 
   private loadUsers(): void {
     try {
-      const data = JSON.parse(fs.readFileSync(this.usersPath, 'utf-8')) as UserRecord[];
-      for (const user of data) this.users.set(user.username, user);
+      const data = JSON.parse(fs.readFileSync(this.usersPath, 'utf-8')) as Array<Partial<UserRecord>>;
+      for (const rec of data) {
+        const user: UserRecord = {
+          username: rec.username ?? '',
+          passwordHash: rec.passwordHash ?? '',
+          isAdmin: rec.isAdmin ?? false,
+          createdAt: rec.createdAt ?? new Date().toISOString(),
+          lastLoginAt: rec.lastLoginAt ?? new Date().toISOString()
+        };
+        if (user.username) this.users.set(user.username, user);
+      }
     } catch { /* 文件不存在或格式错误，视为空 */ }
   }
 

@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import type { ChatMessage, CountdownDisplaySnapshot, CreateRoomResponse, JoinRoomResponse, PrivateRoomView, PublicRoomView, ReconnectResponse, SettlementView } from '../shared/types.js';
+import type { ChatMessage, CountdownDisplaySnapshot, CreateRoomResponse, JoinRoomResponse, LobbyRoomEntry, PrivateRoomView, PublicRoomView, SettlementView } from '../shared/types.js';
 import type { ErrorCode } from '../shared/errors.js';
 
 export interface SelectionState {
@@ -38,9 +38,10 @@ export interface ClientStateSnapshot {
   serverClockOffsetMs: number;
   animatedCardKeys: Set<string>;
   selectionState: SelectionState;
-  authUser: { username: string } | null;
+  authUser: { username: string; isAdmin: boolean } | null;
   authToken: string | null;
   showAuthPage: boolean;
+  lobbyRooms: LobbyRoomEntry[];
 }
 
 export class ClientState {
@@ -60,7 +61,8 @@ export class ClientState {
     selectionState: createInitialSelectionState(),
     authUser: null,
     authToken: null,
-    showAuthPage: true
+    showAuthPage: true,
+    lobbyRooms: []
   };
 
   subscribe(listener: () => void): () => void {
@@ -76,24 +78,28 @@ export class ClientState {
     return buildCountdownSnapshot(this.snapshot);
   }
 
-  async createRoom(nickname: string): Promise<void> {
-    const response = await postJson<CreateRoomResponse>('/api/rooms', { nickname });
+  async createRoom(): Promise<void> {
+    const token = this.snapshot.authToken;
+    if (!token) throw new Error('请先登录。');
+    const response = await authPostJson<CreateRoomResponse>('/api/rooms', token, {});
     this.persistSeat(response.roomCode, response.reconnectToken, response.seatIndex);
     await this.connect(response.roomCode, response.reconnectToken);
   }
 
-  async joinRoom(roomCode: string, nickname: string): Promise<void> {
-    const response = await postJson<JoinRoomResponse>(`/api/rooms/${roomCode.trim().toUpperCase()}/join`, { nickname });
+  async joinRoom(roomCode: string): Promise<void> {
+    const token = this.snapshot.authToken;
+    if (!token) throw new Error('请先登录。');
+    const response = await authPostJson<JoinRoomResponse>(`/api/rooms/${roomCode.trim().toUpperCase()}/join`, token, {});
     this.persistSeat(response.roomCode, response.reconnectToken, response.seatIndex);
     await this.connect(response.roomCode, response.reconnectToken);
   }
 
-  async reconnect(roomCode: string): Promise<void> {
-    const token = this.getReconnectToken(roomCode);
-    if (!token) throw new Error('没有找到该房间的本地重连令牌。');
-    const response = await postJson<ReconnectResponse>(`/api/rooms/${roomCode.trim().toUpperCase()}/reconnect`, { reconnectToken: token });
-    this.persistSeat(response.roomCode, token, response.seatIndex);
-    await this.connect(response.roomCode, token);
+  async fetchLobbyRooms(): Promise<void> {
+    const token = this.snapshot.authToken;
+    if (!token) throw new Error('请先登录。');
+    const response = await authGetJson<{ rooms: LobbyRoomEntry[] }>('/api/rooms/lobby', token);
+    this.snapshot.lobbyRooms = response.rooms;
+    this.emitChange();
   }
 
   startGame(): void {
@@ -136,7 +142,8 @@ export class ClientState {
       selectionState: createInitialSelectionState(),
       authUser,
       authToken,
-      showAuthPage
+      showAuthPage,
+      lobbyRooms: []
     };
     this.emitChange();
   }
@@ -152,7 +159,7 @@ export class ClientState {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error?.message ?? '注册失败。');
     this.snapshot.authToken = data.token;
-    this.snapshot.authUser = data.user;
+    this.snapshot.authUser = { username: data.user.username, isAdmin: data.user.isAdmin ?? false };
     this.snapshot.showAuthPage = false;
     localStorage.setItem(AUTH_TOKEN_KEY, data.token);
     this.emitChange();
@@ -167,7 +174,7 @@ export class ClientState {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error?.message ?? '登陆失败。');
     this.snapshot.authToken = data.token;
-    this.snapshot.authUser = data.user;
+    this.snapshot.authUser = { username: data.user.username, isAdmin: data.user.isAdmin ?? false };
     this.snapshot.showAuthPage = false;
     localStorage.setItem(AUTH_TOKEN_KEY, data.token);
     this.emitChange();
@@ -209,7 +216,7 @@ export class ClientState {
         return;
       }
       const data = await res.json();
-      this.snapshot.authUser = data.user;
+      this.snapshot.authUser = { username: data.user.username, isAdmin: data.user.isAdmin ?? false };
       this.snapshot.showAuthPage = false;
       this.emitChange();
     } catch {
@@ -234,8 +241,10 @@ export class ClientState {
   }
 
   clearError(): void {
-    this.snapshot.error = null;
-    this.emitChange();
+    if (this.snapshot.error !== null) {
+      this.snapshot.error = null;
+      this.emitChange();
+    }
   }
 
   updateCardSelection(updates: Partial<SelectionState>): void {
@@ -376,6 +385,32 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = data?.error?.message ?? '请求失败，请重试。';
+    throw new Error(message);
+  }
+  return data as T;
+}
+
+async function authPostJson<T>(url: string, token: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = data?.error?.message ?? '请求失败，请重试。';
+    throw new Error(message);
+  }
+  return data as T;
+}
+
+async function authGetJson<T>(url: string, token: string): Promise<T> {
+  const response = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {

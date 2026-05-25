@@ -42,7 +42,11 @@ function snapshot(publicOverrides: Partial<PublicRoomView> = {}, privateOverride
       robberSelectedSeat: null,
       troublemakerSelected: [],
       waterGhostSelectedUnderwater: null
-    }
+    },
+    authUser: null,
+    authToken: null,
+    showAuthPage: false,
+    lobbyRooms: []
   };
 }
 

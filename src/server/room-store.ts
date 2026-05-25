@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { GameError } from '../shared/errors.js';
 import { RoomCodeSchema, NicknameSchema } from '../shared/contracts.js';
-import type { CreateRoomResponse, JoinRoomResponse, PlayerSeat, ReconnectResponse, Room, SeatIndex } from '../shared/types.js';
+import type { CreateRoomResponse, JoinRoomResponse, LobbyRoomEntry, PlayerSeat, ReconnectResponse, Room, SeatIndex } from '../shared/types.js';
 import { occupiedSeats } from './game/engine.js';
 
 export interface RoomStoreOptions {
@@ -63,6 +63,7 @@ export class RoomStore {
     if (room.status !== 'waiting') throw new GameError('ROOM_UNAVAILABLE');
     if (occupiedSeats(room).length >= 3) throw new GameError('ROOM_FULL');
     if (occupiedSeats(room).some((seat) => seat.nickname === nickname)) throw new GameError('DUPLICATE_NICKNAME');
+    if (this.isUserInAnyWaitingRoom(nickname)) throw new GameError('ROOM_UNAVAILABLE', '你已在其他房间中，请先退出。');
     const seatIndex = firstEmptySeatIndex(room);
     const reconnectToken = generateToken();
     const now = new Date().toISOString();
@@ -172,6 +173,38 @@ export class RoomStore {
 
   listRooms(): Room[] {
     return [...this.rooms.values()];
+  }
+
+  listWaitingRooms(): LobbyRoomEntry[] {
+    const entries: LobbyRoomEntry[] = [];
+    for (const room of this.rooms.values()) {
+      if (room.status !== 'waiting') continue;
+      const seats = occupiedSeats(room);
+      if (seats.length >= 3) continue;
+      entries.push({
+        roomCode: room.roomCode,
+        playerCount: seats.length,
+        maxPlayers: 3,
+        players: seats.map((s) => ({
+          seatIndex: s.seatIndex,
+          nickname: s.nickname,
+          isOwner: s.isOwner,
+          connectionStatus: s.connectionStatus
+        })),
+        hasPassword: false,
+        createdAt: room.createdAt
+      });
+    }
+    return entries;
+  }
+
+  isUserInAnyWaitingRoom(nickname: string): boolean {
+    const normalized = normalizeNickname(nickname);
+    for (const room of this.rooms.values()) {
+      if (room.status !== 'waiting') continue;
+      if (occupiedSeats(room).some((s) => s.nickname === normalized)) return true;
+    }
+    return false;
   }
 
   cleanupExpiredRooms(now = Date.now()): number {

@@ -216,3 +216,12 @@ export type ReconnectResponse = {
   seatIndex: SeatIndex;
   isOwner: boolean;
 };
+
+export interface LobbyRoomEntry {
+  roomCode: string;
+  playerCount: number;
+  maxPlayers: 3;
+  players: PlayerPublicView[];
+  hasPassword: boolean;
+  createdAt: string;
+}

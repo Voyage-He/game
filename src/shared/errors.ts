@@ -11,7 +11,8 @@ export const ERROR_CODES = [
   'INVALID_TARGET',
   'ACTION_WINDOW_CLOSED',
   'VOTE_ALREADY_SUBMITTED',
-  'VALIDATION_ERROR'
+  'VALIDATION_ERROR',
+  'UNAUTHORIZED'
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -29,7 +30,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_TARGET: '目标无效，请重新选择。',
   ACTION_WINDOW_CLOSED: '该行动阶段已经结束或你已完成本阶段行动。',
   VOTE_ALREADY_SUBMITTED: '你已经提交过投票。',
-  VALIDATION_ERROR: '提交内容格式不正确。'
+  VALIDATION_ERROR: '提交内容格式不正确。',
+  UNAUTHORIZED: '请先登录。'
 };
 
 export class GameError extends Error {
@@ -62,6 +64,8 @@ export function statusForCode(code: ErrorCode): number {
     case 'INVALID_NICKNAME':
     case 'VALIDATION_ERROR':
       return 400;
+    case 'UNAUTHORIZED':
+      return 401;
     default:
       return 400;
   }

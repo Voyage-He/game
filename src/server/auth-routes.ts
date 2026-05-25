@@ -1,8 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { AuthStore, AuthError } from './auth-store.js';
+import { AuthStore, AuthError, type UserRecord } from './auth-store.js';
 
 export interface AuthRequest extends Request {
-  authUser?: { username: string };
+  authUser?: { username: string; isAdmin: boolean };
 }
 
 export function createAuthRouter(authStore: AuthStore): Router {
@@ -18,7 +18,7 @@ export function createAuthRouter(authStore: AuthStore): Router {
       }
       const token = await authStore.register(String(username), String(password), String(inviteCode));
       const user = authStore.getSessionUser(token)!;
-      res.status(201).json({ token, user: { username: user.username } });
+      res.status(201).json({ token, user: { username: user.username, isAdmin: user.isAdmin } });
     } catch (error) {
       next(error);
     }
@@ -34,7 +34,7 @@ export function createAuthRouter(authStore: AuthStore): Router {
       }
       const token = await authStore.login(String(username), String(password));
       const user = authStore.getSessionUser(token)!;
-      res.json({ token, user: { username: user.username } });
+      res.json({ token, user: { username: user.username, isAdmin: user.isAdmin } });
     } catch (error) {
       next(error);
     }
@@ -52,7 +52,7 @@ export function createAuthRouter(authStore: AuthStore): Router {
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: '会话已失效，请重新登录。' } });
       return;
     }
-    res.json({ user: { username: user.username } });
+    res.json({ user: { username: user.username, isAdmin: user.isAdmin } });
   });
 
   /* ── 登出 ── */
@@ -62,34 +62,16 @@ export function createAuthRouter(authStore: AuthStore): Router {
     res.json({ ok: true });
   });
 
-  /* ── 生成邀请码（需要已登录） ── */
+  /* ── 生成邀请码（仅管理员） ── */
   router.post('/admin/invite-codes', (req: AuthRequest, res: Response) => {
-    const token = extractToken(req);
-    if (!token) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: '未登录。' } });
-      return;
-    }
-    const user = authStore.getSessionUser(token);
-    if (!user) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: '会话已失效。' } });
-      return;
-    }
+    const user = requireAdmin(req, authStore);
     const record = authStore.generateInviteCode(user.username);
     res.status(201).json({ code: record.code });
   });
 
-  /* ── 邀请码列表（需要已登录） ── */
+  /* ── 邀请码列表（仅管理员） ── */
   router.get('/admin/invite-codes', (req: AuthRequest, res: Response) => {
-    const token = extractToken(req);
-    if (!token) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: '未登录。' } });
-      return;
-    }
-    const user = authStore.getSessionUser(token);
-    if (!user) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: '会话已失效。' } });
-      return;
-    }
+    requireAdmin(req, authStore);
     const codes = authStore.getInviteCodes();
     res.json({ inviteCodes: codes.map((c) => ({
       code: c.code,
@@ -112,8 +94,23 @@ export function createAuthRouter(authStore: AuthStore): Router {
   return router;
 }
 
-function extractToken(req: Request): string | null {
+export function extractToken(req: Request): string | null {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) return null;
   return header.slice(7).trim();
+}
+
+function requireAdmin(req: AuthRequest, authStore: AuthStore): UserRecord {
+  const token = extractToken(req);
+  if (!token) {
+    throw new AuthError('未登录。');
+  }
+  const user = authStore.getSessionUser(token);
+  if (!user) {
+    throw new AuthError('会话已失效。');
+  }
+  if (!user.isAdmin) {
+    throw new AuthError('仅管理员可以管理邀请码。');
+  }
+  return user;
 }

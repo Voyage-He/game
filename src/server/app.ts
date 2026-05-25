@@ -2,11 +2,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { ZodError } from 'zod';
-import { CreateRoomRequestSchema, JoinRoomRequestSchema, ReconnectRoomRequestSchema } from '../shared/contracts.js';
+import { CreateRoomRequestSchema, JoinRoomRequestSchema } from '../shared/contracts.js';
 import { GameError, toErrorPayload } from '../shared/errors.js';
-import { RoomStore } from './room-store.js';
+import { RoomStore, normalizeNickname } from './room-store.js';
 import { AuthStore } from './auth-store.js';
-import { createAuthRouter } from './auth-routes.js';
+import { createAuthRouter, type AuthRequest, extractToken } from './auth-routes.js';
 
 export interface AppOptions {
   roomStore?: RoomStore;
@@ -24,6 +24,7 @@ export function createApp(options: AppOptions = {}): express.Express {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
   app.use(originGuard(options.publicOrigin ?? process.env.PUBLIC_ORIGIN));
+  app.locals.authStore = authStore;
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
@@ -32,31 +33,34 @@ export function createApp(options: AppOptions = {}): express.Express {
   // Auth routes
   app.use('/api', createAuthRouter(authStore));
 
-  app.post('/api/rooms', (req, res, next) => {
+  // Room routes: prefer auth token → username; fallback to nickname in body (backward compat for tests)
+  app.get('/api/rooms/lobby', (req: AuthRequest, res, next) => {
     try {
-      const body = CreateRoomRequestSchema.parse(req.body);
-      const result = roomStore.createRoom(body.nickname);
+      requireAuthUser(req, authStore); // lobby list always requires auth
+      const entries = roomStore.listWaitingRooms();
+      res.json({ rooms: entries });
+    } catch (error) {
+      next(normalizeZodError(error));
+    }
+  });
+
+  app.post('/api/rooms', (req: AuthRequest, res, next) => {
+    try {
+      const nickname = getNicknameFromAuthOrBody(req, authStore);
+      const result = roomStore.createRoom(nickname);
       res.status(201).json(result);
     } catch (error) {
       next(normalizeZodError(error));
     }
   });
 
-  app.post('/api/rooms/:roomCode/join', (req, res, next) => {
+  app.post('/api/rooms/:roomCode/join', (req: AuthRequest, res, next) => {
     try {
-      const body = JoinRoomRequestSchema.parse(req.body);
-      const result = roomStore.joinRoom(req.params.roomCode, body.nickname);
+      const nickname = getNicknameFromAuthOrBody(req, authStore);
+      const roomCode = req.params.roomCode;
+      if (!roomCode) throw new GameError('VALIDATION_ERROR');
+      const result = roomStore.joinRoom(roomCode, nickname);
       res.status(201).json(result);
-    } catch (error) {
-      next(normalizeZodError(error));
-    }
-  });
-
-  app.post('/api/rooms/:roomCode/reconnect', (req, res, next) => {
-    try {
-      const body = ReconnectRoomRequestSchema.parse(req.body);
-      const result = roomStore.reconnectRoom(req.params.roomCode, body.reconnectToken);
-      res.status(200).json(result);
     } catch (error) {
       next(normalizeZodError(error));
     }
@@ -101,6 +105,29 @@ function originGuard(publicOrigin?: string) {
     }
     next();
   };
+}
+
+function getNicknameFromAuthOrBody(req: AuthRequest, authStore: AuthStore): string {
+  const token = extractToken(req);
+  if (token) {
+    const user = authStore.getSessionUser(token);
+    if (user) return user.username;
+  }
+  // Fallback: use nickname from body (backward compat for tests/transitions)
+  const body = req.body as { nickname?: unknown };
+  if (typeof body?.nickname === 'string' && body.nickname.trim().length > 0) {
+    return normalizeNickname(body.nickname);
+  }
+  throw new GameError('UNAUTHORIZED', '请先登录。');
+}
+
+function requireAuthUser(req: AuthRequest, authStore: AuthStore): { username: string; isAdmin: boolean } {
+  const token = extractToken(req);
+  if (!token) throw new GameError('UNAUTHORIZED', '请先登录。');
+  const user = authStore.getSessionUser(token);
+  if (!user) throw new GameError('UNAUTHORIZED', '会话已失效，请重新登录。');
+  req.authUser = { username: user.username, isAdmin: user.isAdmin };
+  return req.authUser;
 }
 
 function normalizeZodError(error: unknown): unknown {
